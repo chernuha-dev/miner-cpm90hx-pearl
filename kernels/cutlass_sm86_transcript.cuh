@@ -12,8 +12,8 @@ using PearlTensorMma = typename cutlass::gemm::threadblock::DefaultMma<
     int8_t, cutlass::layout::ColumnMajor, 16,
     int32_t, cutlass::layout::RowMajor,
     cutlass::arch::OpClassTensorOp, cutlass::arch::Sm80,
-    cutlass::gemm::GemmShape<128, 256, 64>,
-    cutlass::gemm::GemmShape<64, 64, 64>,
+    cutlass::gemm::GemmShape<128, 256, 128>,
+    cutlass::gemm::GemmShape<64, 64, 128>,
     cutlass::gemm::GemmShape<16, 8, 32>,
     2, cutlass::arch::OpMultiplyAdd,
     false, cutlass::gemm::SharedMemoryClearOption::kNone>::ThreadblockMma;
@@ -79,7 +79,7 @@ __global__ void pearl_cutlass_transcript(int8_t *a, int8_t *b, uint32_t *out,
             ap, sa, {m, 128}, tid, {row_period * 128, 0});
         typename PearlTensorMma::IteratorB ib(
             bp, sb, {128, n}, tid, {0, col_period * 256});
-        mma(2, accum, ia, ib, accum);
+        mma(1, accum, ia, ib, accum);
         uint32_t xor_word = 0;
         #pragma unroll
         for (int i = 0; i < PearlTensorMma::FragmentC::kElements; ++i)
