@@ -18,14 +18,19 @@ def main() -> None:
     a = cp.ones((16, m, 128), dtype=cp.int8)
     b = cp.ones((16, n, 128), dtype=cp.int8)
     t = cp.empty((row_batch * col_batch * 2, 16, 128), dtype=cp.uint32)
-    for bm, bn, warps in ((128, 128, 4), (64, 128, 4), (64, 128, 8),
-                          (64, 256, 4), (64, 256, 8), (32, 128, 8)):
+    for bm, bn, bk, warps, stages in ((64, 128, 128, 4, 1),
+                                       (64, 128, 128, 4, 2),
+                                       (64, 128, 128, 4, 3),
+                                       (64, 128, 64, 4, 1),
+                                       (64, 128, 64, 4, 2),
+                                       (64, 128, 32, 4, 1)):
         grid = (row_batch * 128 // bm, col_batch * 256 // bn)
 
         def launch():
             return ampere_scan[grid](
                 _Ptr(a, tl.int8), _Ptr(b, tl.int8), _Ptr(t, tl.uint32),
-                m, n, 0, 0, BM=bm, BN=bn, num_warps=warps, num_stages=1,
+                m, n, 0, 0, BM=bm, BN=bn, BK=bk,
+                num_warps=warps, num_stages=stages,
             )
 
         kernel = None
@@ -43,7 +48,7 @@ def main() -> None:
         times.sort()
         elapsed_ms = times[len(times) // 2]
         mac = row_batch * 128 * col_batch * 256 * 2048
-        print(f"BM={bm} BN={bn} warps={warps} regs={kernel.n_regs} "
+        print(f"BM={bm} BN={bn} BK={bk} warps={warps} stages={stages} regs={kernel.n_regs} "
               f"shared={kernel.metadata.shared} median={elapsed_ms:.3f} ms "
               f"rate={mac / (elapsed_ms * 1e-3) / 1e12:.2f} TMAC/s", flush=True)
 

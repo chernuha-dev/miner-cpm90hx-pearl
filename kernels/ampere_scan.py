@@ -42,9 +42,11 @@ def ampere_scan(
 
     acc = tl.full((BM, BN), 0, tl.int32)
     for step in range(16):
-        a = tl.load(A + (step * M + row[:, None]) * 128 + kk[None, :])
-        b = tl.load(B + (step * N + col[None, :]) * 128 + kk[:, None])
-        acc = tl.dot(a, b, acc)
+        for part in range(128 // BK):
+            k = part * BK + kk
+            a = tl.load(A + (step * M + row[:, None]) * 128 + k[None, :])
+            b = tl.load(B + (step * N + col[None, :]) * 128 + k[:, None])
+            acc = tl.dot(a, b, acc)
 
         tile_xor = tl.reshape(acc.to(tl.uint32), (BM // 8, 8, BN // 16, 16))
         tile_xor = tl.xor_sum(tile_xor, 3)
