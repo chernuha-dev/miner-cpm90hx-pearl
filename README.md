@@ -1,10 +1,18 @@
 # Pearl miner for two CMP 90HX
 
-Work in progress. The CUDA miner source is now in this repository; **it has not yet produced an accepted Kryptex share**. Forge Miner remains the production fallback on the rig.
+Work in progress. The CUDA miner has produced a **verified share accepted by Kryptex** with both CMP 90HX cards enabled. Forge Miner remains the production miner on the rig while we work toward a higher accepted-share rate per watt.
 
 The implementation starts from [CPPminer](https://github.com/1640675651/CPPminer) at commit `6785ad349a33f7bebb3ffe1dc1ad876b56d66ef8` under its MIT license. See [LICENSE](LICENSE). We are adapting its protocol, proof encoding, and CUDA path for current Pearl and Kryptex.
 
 Target rig: HiveOS, Kryptex pool, two NVIDIA CMP 90HX. Current Forge Miner baseline: 62.5 + 63.9 = **126.4 TH/s** at **360 W** total (0.351 TH/s/W). These are the numbers to beat using **pool-accepted shares**, not only the miner's local speed display.
+
+The miner charges **no developer fee**. The legacy upstream fee interface now always authorizes with the configured user wallet and has no developer wallet or fee scheduler.
+
+## Current rig result
+
+The independent sm_86 tensor-core kernel uses two GPUs on disjoint search ranges. Its production-size full scan measured **50.26 TMAC/s** in an offline hard-target test (1.400 s scan, 0.017 s preparation, row batch 16, column batch 1024). A live Kryptex run with the preceding kernel revision found a GPU1 share, passed the local certificate-version-3 verifier, and received `{"id":2,"result":true,"error":null}` from the pool. During that live run, the GPUs drew 179.47 and 179.55 W. The latest four-warp kernel also produced a GPU1 share that passed the local verifier; its pool acceptance has not yet been retested.
+
+TMAC/s is this miner's count of int8 matrix multiply-accumulate work. Forge reports TH/s, so a sustained accepted-share comparison is still needed before claiming a direct speed or profit ratio. The current scan and power readings do not establish an advantage over Forge.
 
 ## Rig environment
 
