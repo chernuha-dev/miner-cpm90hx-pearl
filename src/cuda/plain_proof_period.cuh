@@ -133,15 +133,15 @@ __global__ void plain_proof_period_jackpot_kernel(
     const int rel_c = col_in_batch * PP_COL_PERIOD + col_base + PP_COL_PAT[v];
     const bool valid = rel_r < M && rel_c < N;
 
-    __shared__ int32_t s_tile[PP_HASH_H * PP_HASH_W];
+    __shared__ uint32_t s_warp_xor[(PP_HASH_H * PP_HASH_W) / 32];
     __shared__ uint32_t s_jackpot[PP_JACKPOT_WORDS];
 
     if(u == 0 && v == 0)
         for(int i = 0; i < PP_JACKPOT_WORDS; i++) s_jackpot[i] = 0u;
-    s_tile[u * PP_HASH_W + v] = 0;
-    __syncthreads();
 
     int32_t cell = 0;
+    const int lane = (u * PP_HASH_W + v) & 31;
+    const int warp = (u * PP_HASH_W + v) >> 5;
     const int num_steps = K / R;
     for(int step = 0; step < num_steps; step++){
         if(valid){
@@ -150,13 +150,15 @@ __global__ void plain_proof_period_jackpot_kernel(
                                       row_batch_count, col_batch_count)];
             cell += partial;
         }
-        s_tile[u * PP_HASH_W + v] = cell;
+        uint32_t x = (uint32_t)cell;
+        for(int offset = 16; offset > 0; offset >>= 1)
+            x ^= __shfl_xor_sync(0xffffffffu, x, offset);
+        if(lane == 0) s_warp_xor[warp] = x;
         __syncthreads();
 
         if(u == 0 && v == 0){
-            uint32_t xored = 0u;
-            for(int i = 0; i < PP_HASH_H * PP_HASH_W; i++)
-                xored ^= (uint32_t)s_tile[i];
+            const uint32_t xored = s_warp_xor[0] ^ s_warp_xor[1]
+                                   ^ s_warp_xor[2] ^ s_warp_xor[3];
             const int tid = step % PP_JACKPOT_WORDS;
             s_jackpot[tid] = pp_rotl32(s_jackpot[tid], PP_LROT) ^ xored;
         }
