@@ -12,7 +12,7 @@ using DefaultMma = typename cutlass::gemm::threadblock::DefaultMma<
     int32_t, cutlass::layout::RowMajor,
     cutlass::arch::OpClassTensorOp, cutlass::arch::Sm80,
     cutlass::gemm::GemmShape<128, 256, 64>,
-    cutlass::gemm::GemmShape<32, 128, 64>,
+    cutlass::gemm::GemmShape<64, 64, 64>,
     cutlass::gemm::GemmShape<16, 8, 32>,
     2, cutlass::arch::OpMultiplyAdd,
     false, cutlass::gemm::SharedMemoryClearOption::kNone>::ThreadblockMma;
@@ -92,6 +92,13 @@ int main() {
             for (bool v : col_seen) nc += v;
             printf("thread %d first=%d last=%d tile=%d single=%d rows=%d cols=%d\n",
                    tid, out[tid * 128], out[tid * 128 + 127], tile, same_tile, nr, nc);
+            if (tid == 0) {
+                printf("thread 0 rows:");
+                for (int row = 0; row < 128; ++row) if (row_seen[row]) printf(" %d", row);
+                printf("\nthread 0 cols:");
+                for (int col = 0; col < 256; ++col) if (col_seen[col]) printf(" %d", col);
+                printf("\n");
+            }
         }
     }
     int unique = 0, missing = 0, duplicated = 0;
