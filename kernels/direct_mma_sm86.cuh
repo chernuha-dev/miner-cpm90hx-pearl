@@ -5,6 +5,10 @@
 #include "cutlass/arch/mma_sm80.h"
 #include "cutlass/gemm/gemm.h"
 
+#ifndef PEARL_DIRECT_UNROLL
+#define PEARL_DIRECT_UNROLL 4
+#endif
+
 using PearlDirectMma = cutlass::arch::Mma<
     cutlass::gemm::GemmShape<16, 8, 32>, 32,
     int8_t, cutlass::layout::RowMajor,
@@ -29,7 +33,7 @@ __global__ void pearl_direct_transcript(const int8_t *a, const int8_t *b,
         for (int ni = 0; ni < 8; ++ni)
             accum[mi][ni].clear();
 
-    #pragma unroll 1
+    #pragma unroll PEARL_DIRECT_UNROLL
     for (int step = 0; step < 16; ++step) {
         const int8_t *as = a + size_t(step) * m * 128;
         const int8_t *bs = b + size_t(step) * n * 128;
