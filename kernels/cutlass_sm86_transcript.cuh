@@ -15,7 +15,7 @@ using PearlTensorMma = typename cutlass::gemm::threadblock::DefaultMma<
     cutlass::gemm::GemmShape<128, 256, 64>,
     cutlass::gemm::GemmShape<64, 64, 64>,
     cutlass::gemm::GemmShape<16, 8, 32>,
-    2, cutlass::arch::OpMultiplyAdd,
+    3, cutlass::arch::OpMultiplyAdd,
     false, cutlass::gemm::SharedMemoryClearOption::kNone>::ThreadblockMma;
 
 __host__ __device__ inline int pearl_perm_row(int physical) {
