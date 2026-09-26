@@ -34,17 +34,10 @@ int main() {
     cudaMalloc(&dout, 16 * 256 * sizeof(uint32_t));
     cudaMemcpy(da, ap.data(), ap.size(), cudaMemcpyHostToDevice);
     cudaMemcpy(db, bp.data(), bp.size(), cudaMemcpyHostToDevice);
-    cudaError_t err = cudaFuncSetAttribute(
-        pearl_cutlass_transcript, cudaFuncAttributeMaxDynamicSharedMemorySize,
-        sizeof(PearlTensorMma::SharedStorage));
-    if (err != cudaSuccess) {
-        fprintf(stderr, "shared-memory opt-in: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
     pearl_cutlass_transcript<<<dim3(1, 1), 256,
                                sizeof(PearlTensorMma::SharedStorage)>>>(
         da, db, dout, m, n, 0, 0);
-    err = cudaDeviceSynchronize();
+    cudaError_t err = cudaDeviceSynchronize();
     if (err != cudaSuccess) {
         fprintf(stderr, "kernel: %s\n", cudaGetErrorString(err));
         return 1;
