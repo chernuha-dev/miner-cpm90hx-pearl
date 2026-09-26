@@ -4,6 +4,12 @@
 #include <vector>
 #include <cuda_runtime.h>
 #include "cutlass_sm86_transcript.cuh"
+#ifdef PEARL_TEST_DIRECT
+#include "direct_mma_sm86.cuh"
+#define PEARL_TEST_KERNEL pearl_direct_transcript
+#else
+#define PEARL_TEST_KERNEL pearl_cutlass_transcript
+#endif
 
 int main() {
     constexpr int m = 128, n = 256;
@@ -34,9 +40,14 @@ int main() {
     cudaMalloc(&dout, 16 * 256 * sizeof(uint32_t));
     cudaMemcpy(da, ap.data(), ap.size(), cudaMemcpyHostToDevice);
     cudaMemcpy(db, bp.data(), bp.size(), cudaMemcpyHostToDevice);
-    pearl_cutlass_transcript<<<dim3(1, 1), 256,
-                               sizeof(PearlTensorMma::SharedStorage)>>>(
+#ifdef PEARL_TEST_DIRECT
+    PEARL_TEST_KERNEL<<<dim3(1, 1), 256>>>(
         da, db, dout, m, n, 0, 0);
+#else
+    PEARL_TEST_KERNEL<<<dim3(1, 1), 256,
+                          sizeof(PearlTensorMma::SharedStorage)>>>(
+        da, db, dout, m, n, 0, 0);
+#endif
     cudaError_t err = cudaDeviceSynchronize();
     if (err != cudaSuccess) {
         fprintf(stderr, "kernel: %s\n", cudaGetErrorString(err));
@@ -75,10 +86,15 @@ int main() {
         }
     }
     cudaFuncAttributes attr{};
-    cudaFuncGetAttributes(&attr, pearl_cutlass_transcript);
+    cudaFuncGetAttributes(&attr, PEARL_TEST_KERNEL);
     printf("16 milestones x 256 hash tiles: exact transcript words; "
            "regs=%d static_smem=%zu dynamic_smem=%zu\n",
-           attr.numRegs, attr.sharedSizeBytes, sizeof(PearlTensorMma::SharedStorage));
+           attr.numRegs, attr.sharedSizeBytes,
+#ifdef PEARL_TEST_DIRECT
+           size_t(0));
+#else
+           sizeof(PearlTensorMma::SharedStorage));
+#endif
     cudaFree(da); cudaFree(db); cudaFree(dout);
     return 0;
 }
