@@ -12,7 +12,7 @@ using DefaultMma = typename cutlass::gemm::threadblock::DefaultMma<
     int32_t, cutlass::layout::RowMajor,
     cutlass::arch::OpClassTensorOp, cutlass::arch::Sm80,
     cutlass::gemm::GemmShape<128, 256, 64>,
-    cutlass::gemm::GemmShape<64, 64, 64>,
+    cutlass::gemm::GemmShape<32, 128, 64>,
     cutlass::gemm::GemmShape<16, 8, 32>,
     2, cutlass::arch::OpMultiplyAdd,
     false, cutlass::gemm::SharedMemoryClearOption::kNone>::ThreadblockMma;
@@ -70,6 +70,7 @@ int main() {
     for (int tid = 0; tid < 256; ++tid) {
         int tile = -1;
         bool same_tile = true;
+        bool row_seen[128] = {}, col_seen[256] = {};
         for (int i = 0; i < 128; ++i) {
             int value = out[tid * 128 + i];
             if (value < 0 || value >= 128 * 256) {
@@ -78,14 +79,20 @@ int main() {
             }
             ++seen[value];
             int row = value / 256, col = value % 256;
+            row_seen[row] = true;
+            col_seen[col] = true;
             int t = (row / 8) * 16 + col / 16;
             if (tile == -1) tile = t;
             if (tile != t) same_tile = false;
         }
         single_tile_threads += same_tile;
-        if (tid < 4)
-            printf("thread %d first=%d last=%d tile=%d single=%d\n",
-                   tid, out[tid * 128], out[tid * 128 + 127], tile, same_tile);
+        if (tid < 4) {
+            int nr = 0, nc = 0;
+            for (bool v : row_seen) nr += v;
+            for (bool v : col_seen) nc += v;
+            printf("thread %d first=%d last=%d tile=%d single=%d rows=%d cols=%d\n",
+                   tid, out[tid * 128], out[tid * 128 + 127], tile, same_tile, nr, nc);
+        }
     }
     int unique = 0, missing = 0, duplicated = 0;
     for (int count : seen) {
