@@ -19,15 +19,20 @@ def main() -> None:
     b = cp.ones((16, n, 128), dtype=cp.int8)
     t = cp.empty((row_batch * col_batch * 2, 16, 128), dtype=cp.uint32)
     o = cp.empty((row_batch * 128 // 64, col_batch * 256 // 128, 128), dtype=cp.int32)
-    variants = (("dot-only", ampere_dot_probe, o),
-                ("transcript", ampere_scan, t))
-    for name, fn, output in variants:
+    variants = (("dot-only", ampere_dot_probe, o, 1, False),
+                ("dot-reuse", ampere_dot_probe, o, 1, True),
+                ("dot-unroll4", ampere_dot_probe, o, 4, False),
+                ("dot-unroll16", ampere_dot_probe, o, 16, False),
+                ("transcript", ampere_scan, t, 1, False))
+    for name, fn, output, unroll, reuse in variants:
         grid = (row_batch * 128 // 64, col_batch * 256 // 128)
 
         def probe_launch():
+            kwargs = {"UNROLL": unroll, "REUSE": reuse} if name != "transcript" else {}
             return fn[grid](_Ptr(a, tl.int8), _Ptr(b, tl.int8),
-                            _Ptr(output, tl.int32 if name == "dot-only" else tl.uint32),
-                            m, n, 0, 0, BM=64, BN=128, num_warps=4, num_stages=1)
+                            _Ptr(output, tl.uint32 if name == "transcript" else tl.int32),
+                            m, n, 0, 0, BM=64, BN=128, num_warps=4, num_stages=1,
+                            **kwargs)
 
         kernel = None
         for _ in range(3):
