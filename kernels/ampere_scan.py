@@ -22,9 +22,10 @@ def ampere_scan(
     BK: tl.constexpr = 128,
 ):
     row_split = 128 // BM
+    col_split = 256 // BN
     pr_slice = tl.program_id(0)
     pr = pr_slice // row_split
-    pc_half = tl.program_id(1)
+    pc_slice = tl.program_id(1)
     rr = tl.arange(0, BM)
     cc = tl.arange(0, BN)
     kk = tl.arange(0, BK)
@@ -34,10 +35,10 @@ def ampere_scan(
     row_base = tl.where(row_tile < 8, row_tile, 16 + row_tile - 8)
     row = (RPI0 + pr) * 128 + row_base + (row_u // 2) * 32 + (row_u % 2) * 8
 
-    col_tile = (pc_half % 2) * 8 + cc // 16
+    col_tile = (pc_slice % col_split) * (BN // 16) + cc // 16
     col_v = cc % 16
     col_base = tl.where(col_tile < 8, col_tile * 2, 16 + (col_tile - 8) * 2)
-    col = (CPI0 + pc_half // 2) * 256 + col_base + (col_v // 2) * 32 + col_v % 2
+    col = (CPI0 + pc_slice // col_split) * 256 + col_base + (col_v // 2) * 32 + col_v % 2
 
     acc = tl.full((BM, BN), 0, tl.int32)
     for step in range(16):
@@ -45,15 +46,21 @@ def ampere_scan(
         b = tl.load(B + (step * N + col[None, :]) * 128 + kk[:, None])
         acc = tl.dot(a, b, acc)
 
-        tile_xor = tl.reshape(acc.to(tl.uint32), (BM // 8, 8, 8, 16))
+        tile_xor = tl.reshape(acc.to(tl.uint32), (BM // 8, 8, BN // 16, 16))
         tile_xor = tl.xor_sum(tile_xor, 3)
         tile_xor = tl.xor_sum(tile_xor, 1)
-        tile_xor = tl.reshape(tile_xor, (BM,))
-        tile = tl.arange(0, BM)
-        batch_col_halves = tl.num_programs(1)
-        local_cta = pr * batch_col_halves + pc_half
-        tl.store(T + (local_cta * 16 + step) * 128 + (pr_slice % row_split) * BM + tile,
-                 tile_xor)
+        output_words = BM * BN // 128
+        tile_xor = tl.reshape(tile_xor, (output_words,))
+        tile = tl.arange(0, output_words)
+        local_col = tile % (BN // 16)
+        row_tile_out = tile // (BN // 16)
+        col_tile_out = (pc_slice % col_split) * (BN // 16) + local_col
+        half = col_tile_out // 8
+        tile_in_half = row_tile_out * 8 + col_tile_out % 8
+        batch_col_periods = tl.num_programs(1) // col_split
+        local_cta = (pr * batch_col_periods + pc_slice // col_split) * 2 + half
+        tl.store(T + (local_cta * 16 + step) * 128
+                 + (pr_slice % row_split) * BM + tile_in_half, tile_xor)
 
 
 class _Ptr:

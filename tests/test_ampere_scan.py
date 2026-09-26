@@ -30,11 +30,13 @@ def main() -> None:
     a, b = cp.asarray(a_host), cp.asarray(b_host)
     row_pattern = [(u // 2) * 32 + (u % 2) * 8 for u in range(8)]
     col_pattern = [(v // 2) * 32 + (v % 2) for v in range(16)]
-    for bm, warps in ((32, 8), (64, 4), (64, 8), (128, 8)):
+    for bm, bn, warps in ((32, 128, 8), (64, 128, 4), (64, 128, 8),
+                          (64, 256, 4), (64, 256, 8), (128, 128, 8)):
         transcript = cp.empty((2, 16, 128), dtype=cp.uint32)
-        ampere_scan[(128 // bm, 2)](
+        ampere_scan[(128 // bm, 256 // bn)](
             _Ptr(a, tl.int8), _Ptr(b, tl.int8), _Ptr(transcript, tl.uint32),
-            m, n, row_period0, col_period0, BM=bm, num_warps=warps, num_stages=1,
+            m, n, row_period0, col_period0, BM=bm, BN=bn,
+            num_warps=warps, num_stages=1,
         )
         got = cp.asnumpy(transcript)
         for row_tile, col_tile in ((0, 0), (1, 1), (7, 8), (15, 15)):
@@ -50,8 +52,8 @@ def main() -> None:
                 want = np.bitwise_xor.reduce(accum.view(np.uint32).reshape(-1))
                 have = got[cta, step, tile]
                 if want != have:
-                    raise AssertionError((bm, warps, row_tile, col_tile, step, int(want), int(have)))
-        print(f"PASS: BM={bm} warps={warps}, 64 randomized transcript words match NumPy")
+                    raise AssertionError((bm, bn, warps, row_tile, col_tile, step, int(want), int(have)))
+        print(f"PASS: BM={bm} BN={bn} warps={warps}, 64 randomized transcript words match NumPy")
 
 
 if __name__ == "__main__":
