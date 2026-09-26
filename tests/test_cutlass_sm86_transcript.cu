@@ -48,7 +48,9 @@ int main() {
     for (int row = 0; row < m; ++row) {
         for (int col = 0; col < n; ++col) {
             int32_t acc = 0;
-            const int tile = (row / 8) * 16 + col / 16;
+            const int tile_row = (row % 8) + 8 * ((row % 32) / 16);
+            const int tile_col = (col % 32) / 2;
+            const int tile = tile_row * 16 + tile_col;
             for (int step = 0; step < 16; ++step) {
                 for (int k = 0; k < 128; ++k)
                     acc += int(a[(step * m + row) * 128 + k]) *

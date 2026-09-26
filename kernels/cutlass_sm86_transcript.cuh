@@ -20,13 +20,20 @@ using PearlTensorMma = typename cutlass::gemm::threadblock::DefaultMma<
 
 __host__ __device__ inline int pearl_perm_row(int physical) {
     const int within = physical % 64;
-    return (physical / 64) * 64 + (within % 8) * 8 + within / 8;
+    const int packed = (physical / 64) * 64 + (within % 8) * 8 + within / 8;
+    const int tile = packed / 8;
+    const int u = packed % 8;
+    const int row_base = tile < 8 ? tile : tile + 8;
+    return row_base + (u / 2) * 32 + (u % 2) * 8;
 }
 
 __host__ __device__ inline int pearl_perm_col(int physical) {
     const int within = physical % 64;
-    return (physical / 64) * 64 + ((within % 8) / 2) * 16
-           + (within / 8) * 2 + (within % 2);
+    const int packed = (physical / 64) * 64 + ((within % 8) / 2) * 16
+                       + (within / 8) * 2 + (within % 2);
+    const int tile = packed / 16;
+    const int v = packed % 16;
+    return tile * 2 + (v / 2) * 32 + (v % 2);
 }
 
 __global__ void pearl_perm_a(const int8_t *input, int8_t *output, int m) {
