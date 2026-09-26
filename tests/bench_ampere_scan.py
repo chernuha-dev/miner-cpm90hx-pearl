@@ -83,6 +83,35 @@ def main() -> None:
         except Exception as exc:
             print(f"dot shape BM={bm} BN={bn} warps={warps}: {exc}", flush=True)
 
+    for bm, bn, warps in ((64, 256, 4), (128, 128, 4), (128, 128, 8),
+                          (128, 256, 8), (128, 256, 16)):
+        grid = (row_batch * 128 // bm, col_batch * 256 // bn)
+
+        def transcript_launch():
+            return ampere_scan[grid](
+                _Ptr(a, tl.int8), _Ptr(b, tl.int8), _Ptr(t, tl.uint32),
+                m, n, 0, 0, BM=bm, BN=bn, num_warps=warps, num_stages=1)
+
+        try:
+            kernel = transcript_launch()
+            transcript_launch()
+            cp.cuda.runtime.deviceSynchronize()
+            samples = []
+            for _ in range(5):
+                start, stop = cp.cuda.Event(), cp.cuda.Event()
+                start.record()
+                transcript_launch()
+                stop.record()
+                stop.synchronize()
+                samples.append(cp.cuda.get_elapsed_time(start, stop))
+            samples.sort()
+            elapsed_ms = samples[len(samples) // 2]
+            print(f"transcript shape BM={bm} BN={bn} warps={warps} "
+                  f"regs={kernel.n_regs} shared={kernel.metadata.shared} "
+                  f"median={elapsed_ms:.3f} ms rate={mac / (elapsed_ms * 1e-3) / 1e12:.2f} TMAC/s", flush=True)
+        except Exception as exc:
+            print(f"transcript shape BM={bm} BN={bn} warps={warps}: {exc}", flush=True)
+
     for bm, bn, bk, warps, stages in ((64, 128, 128, 4, 1),
                                        (64, 128, 128, 4, 2),
                                        (64, 128, 128, 4, 3),
