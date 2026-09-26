@@ -775,7 +775,7 @@ static void gpu_period_gemm_batch(
                         &global_scratch, &profile_scratch};
         CUresult rc = cuLaunchKernel(
             g->ampere_scan,
-            (unsigned)row_batch_count, (unsigned)(col_batch_count * 2), 1,
+            (unsigned)(row_batch_count * 2), (unsigned)(col_batch_count * 2), 1,
             block_threads, 1, 1, 32768, 0, args, nullptr);
         if(rc != CUDA_SUCCESS){
             fprintf(stderr, "[gpu] Ampere transcript kernel launch failed (CUDA driver error %d)\n",

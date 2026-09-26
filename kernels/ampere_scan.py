@@ -65,7 +65,7 @@ class _Ptr:
         return int(self.array.data.ptr)
 
 
-def build_cubin(output: Path, bm: int = 128) -> None:
+def build_cubin(output: Path, bm: int = 64) -> None:
     import cupy as cp
 
     cp.cuda.Device(0).use()
@@ -88,6 +88,6 @@ def build_cubin(output: Path, bm: int = 128) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, default=Path("kernels/ampere_sm86.cubin"))
-    parser.add_argument("--bm", type=int, choices=(64, 128), default=128)
+    parser.add_argument("--bm", type=int, choices=(64, 128), default=64)
     args = parser.parse_args()
     build_cubin(args.output, args.bm)
