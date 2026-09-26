@@ -23,6 +23,8 @@ bash scripts/rig_probe.sh
 
 The first cuBLAS INT8 probe measured 35.7 TOPS per card at 2048³, and 41.6 / 43.2 TOPS at 4096³. Those figures characterize hardware throughput; they are not PearlHash rates.
 
+An [Ampere kernel survey and rig benchmark](docs/open-pearl-miner-evaluation.md) found a faster isolated tensor-core path in `minerjed/open-pearl-miner`, but its hash-tile geometry and license prevent direct inclusion here.
+
 Current Kryptex Stratum observation: `mining.authorize` sends an object containing `agent`, `type: "v2"`, `wallet`, and `worker`. `mining.notify` sends `header`, `height`, `job_id`, `target`, `cert_version`. `mining.submit` sends `job_id` and a gzip-compressed, base64-encoded `plain_proof`. A real Forge share was accepted with this format. Capture files are private and are not committed.
 
 References: [Pearl source](https://github.com/pearl-research-labs/pearl), [NVIDIA CMP specifications](https://www.nvidia.com/en-us/cmp/), [CUDA programming guide](https://docs.nvidia.com/cuda/cuda-programming-guide/).
