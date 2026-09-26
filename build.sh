@@ -196,7 +196,7 @@ find_cuda_root() {
     local candidates=(
         "/usr/local/cuda"
         "/usr/local/cuda-"*
-        "${CUDA_HOME}"
+        "${CUDA_HOME:-}"
     )
     local c
     for c in "${candidates[@]}"; do
