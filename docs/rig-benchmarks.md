@@ -35,3 +35,29 @@ The rig already uses a persistent `cmpunlocker-90hx-stockflow` NVIDIA kernel mod
 On one CMP 90HX, a production-size `--profile-scan=3` at row batch 16 and column batch 512 measured 25.16 TMAC/s per batch. The transcript GEMM used 21.443 ms (98.1%); CUDA BLAKE3 jackpot used 0.323 ms (1.5%); synchronization used 0.088 ms (0.4%). The full one-GPU sweep took 2.828 s (24.88 TMAC/s). Thus the main limit is the matrix/transcript kernel, not proof submission, pool protocol, or host synchronization. The profiler's inherited `C_hist` and `16x GemmEx` labels refer to an older path and do not describe the Ampere implementation.
 
 Additional production-batch measurements on one GPU were 30.87 TMAC/s for the shipped BM64/BN128/BK128, four-warp, one-stage shape; 28.11 for two stages; 30.84 for three stages; 30.55 for BK64; and 27.82 for BK32. These variations did not close the gap to Forge. The default binary remains BM64/BN128/BK128, four warps, one stage. A substantially different sm_86 compute kernel is the next performance task.
+
+## September 27 kernel research
+
+All rates below are isolated per-GPU production-batch measurements with the
+Forge service stopped for the benchmark and restarted afterward. They are not
+pool hashrates or accepted-share results.
+
+| Experiment | Median rate |
+|---|---:|
+| Shipped INT8 transcript, BM64/BN128 | 31.95 TMAC/s |
+| Same INT8 dot, final reduction only (invalid as a miner) | 37.26 TMAC/s |
+| Same operands repeated at every step (invalid as a miner) | 98.33 TMAC/s |
+| Dot only, BM128/BN256/16 warps (invalid as a miner) | 57.28 TMAC/s |
+| Full transcript, BM128/BN256/16 warps | 28.30 TMAC/s |
+| Full transcript with row-first XOR, BM64/BN128 | 26.99 TMAC/s |
+| Zero-B factorization, FP16, BM64/BN128 | 22.85 equivalent TMAC/s |
+| Zero-B factorization, two signed INT8 limbs, BM128/BN128 | 32.03 equivalent TMAC/s |
+
+The dot-only and repeated-operand numbers are diagnostic ceilings, not valid
+mining rates. Larger tiles reduce the operand-load cost but make per-step
+transcript reduction much more expensive. The zero-B factorization exploits
+the pool's rank-128 B noise basis and still has no measured speed advantage;
+its prototype has not been connected to a certificate-verified live scan.
+Neither experimental factorization kernel is selected by the production miner.
+Forge remains the active service on the rig. No new implementation has
+demonstrated greater accepted PRL shares per watt than Forge.
