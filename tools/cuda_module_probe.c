@@ -37,6 +37,8 @@ static size_t image_size(const void *image) {
         if (h->e_ident[EI_CLASS] != ELFCLASS64 || h->e_shnum > 10000)
             return 0;
         size_t end = (size_t)h->e_shoff + (size_t)h->e_shentsize * h->e_shnum;
+        size_t program_end = (size_t)h->e_phoff + (size_t)h->e_phentsize * h->e_phnum;
+        if (program_end > end) end = program_end;
         const Elf64_Shdr *sh = (const void *)((const char *)image + h->e_shoff);
         for (unsigned int i = 0; i < h->e_shnum; ++i) {
             if (sh[i].sh_type != SHT_NOBITS) {
