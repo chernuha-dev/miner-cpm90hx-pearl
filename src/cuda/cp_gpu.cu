@@ -767,9 +767,12 @@ static void gpu_period_gemm_batch(
         int row0 = row_period0;
         int col0 = col_period0;
         uint32_t* transcript = g->d_ampere_transcript;
+        CUdeviceptr global_scratch = 0;
+        CUdeviceptr profile_scratch = 0;
         const int block_threads = 256;
         void* args[] = {&g->d_Ap, &g->d_BpT, &transcript,
-                        &m, &n, &row0, &col0};
+                        &m, &n, &row0, &col0,
+                        &global_scratch, &profile_scratch};
         CUresult rc = cuLaunchKernel(
             g->ampere_scan,
             (unsigned)row_batch_count, (unsigned)(col_batch_count * 2), 1,
