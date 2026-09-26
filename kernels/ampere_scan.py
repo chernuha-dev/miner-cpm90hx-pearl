@@ -65,7 +65,7 @@ class _Ptr:
         return int(self.array.data.ptr)
 
 
-def build_cubin(output: Path, bm: int = 64) -> None:
+def build_cubin(output: Path, bm: int = 64, warps: int = 4) -> None:
     import cupy as cp
 
     cp.cuda.Device(0).use()
@@ -74,7 +74,7 @@ def build_cubin(output: Path, bm: int = 64) -> None:
     t = cp.empty((2, 16, 128), dtype=cp.uint32)
     kernel = ampere_scan[(128 // bm, 2)](
         _Ptr(a, tl.int8), _Ptr(b, tl.int8), _Ptr(t, tl.uint32),
-        128, 256, 0, 0, BM=bm, num_warps=8, num_stages=1,
+        128, 256, 0, 0, BM=bm, num_warps=warps, num_stages=1,
     )
     cp.cuda.runtime.deviceSynchronize()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -89,5 +89,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, default=Path("kernels/ampere_sm86.cubin"))
     parser.add_argument("--bm", type=int, choices=(32, 64, 128), default=64)
+    parser.add_argument("--warps", type=int, choices=(4, 8, 16), default=4)
     args = parser.parse_args()
-    build_cubin(args.output, args.bm)
+    build_cubin(args.output, args.bm, args.warps)

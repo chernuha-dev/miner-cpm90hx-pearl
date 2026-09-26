@@ -769,7 +769,7 @@ static void gpu_period_gemm_batch(
         uint32_t* transcript = g->d_ampere_transcript;
         CUdeviceptr global_scratch = 0;
         CUdeviceptr profile_scratch = 0;
-        const int block_threads = 256;
+        const int block_threads = 128;
         void* args[] = {&g->d_Ap, &g->d_BpT, &transcript,
                         &m, &n, &row0, &col0,
                         &global_scratch, &profile_scratch};
