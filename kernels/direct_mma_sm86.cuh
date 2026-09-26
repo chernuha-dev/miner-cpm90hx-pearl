@@ -36,7 +36,6 @@ __global__ void pearl_direct_transcript(const int8_t *a, const int8_t *b,
         #pragma unroll
         for (int chunk = 0; chunk < 4; ++chunk) {
             PearlDirectMma::FragmentA fa[4];
-            PearlDirectMma::FragmentB fb[8];
             #pragma unroll
             for (int mi = 0; mi < 4; ++mi) {
                 const int ar0 = row0 + mi * 16 + group;
@@ -50,17 +49,15 @@ __global__ void pearl_direct_transcript(const int8_t *a, const int8_t *b,
             }
             #pragma unroll
             for (int ni = 0; ni < 8; ++ni) {
+                PearlDirectMma::FragmentB fb;
                 const int bc = col0 + ni * 8 + group;
                 const int bk = chunk * 32 + four * 4;
-                auto *d = reinterpret_cast<uint32_t *>(&fb[ni]);
+                auto *d = reinterpret_cast<uint32_t *>(&fb);
                 d[0] = *reinterpret_cast<const uint32_t *>(bs + size_t(bc) * 128 + bk);
                 d[1] = *reinterpret_cast<const uint32_t *>(bs + size_t(bc) * 128 + bk + 16);
-            }
-            #pragma unroll
-            for (int mi = 0; mi < 4; ++mi) {
                 #pragma unroll
-                for (int ni = 0; ni < 8; ++ni)
-                    op(accum[mi][ni], fa[mi], fb[ni], accum[mi][ni]);
+                for (int mi = 0; mi < 4; ++mi)
+                    op(accum[mi][ni], fa[mi], fb, accum[mi][ni]);
             }
         }
         uint32_t word = 0;
