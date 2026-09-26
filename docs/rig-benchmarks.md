@@ -27,3 +27,11 @@ Both runs used the same rig, Kryptex PRL pool, wallet and displayed share diffic
 | ForgeMiner v1.8.1 | 21:25:05–21:30:05 | 7 / 0 | 359–360 W total |
 
 Our miner completed 208 attempts and its scan-weighted rate was 49.63 TMAC/s. Including job changes and proof work, the five-minute window averaged 47.53 TMAC/s by its own work counter. Forge displayed about 126–128 TH/s during its window. The direct pool result favors Forge on this rig at present. Five-minute share counts are noisy; 7:1 is the observed count ratio, not a precise long-run income multiplier. Forge remains the running service.
+
+## Kernel bottleneck after the comparison
+
+The rig already uses a persistent `cmpunlocker-90hx-stockflow` NVIDIA kernel module. Our and Forge's runs both draw about 180 W per GPU, so enabling the existing unlock is not a missing step.
+
+On one CMP 90HX, a production-size `--profile-scan=3` at row batch 16 and column batch 512 measured 25.16 TMAC/s per batch. The transcript GEMM used 21.443 ms (98.1%); CUDA BLAKE3 jackpot used 0.323 ms (1.5%); synchronization used 0.088 ms (0.4%). The full one-GPU sweep took 2.828 s (24.88 TMAC/s). Thus the main limit is the matrix/transcript kernel, not proof submission, pool protocol, or host synchronization. The profiler's inherited `C_hist` and `16x GemmEx` labels refer to an older path and do not describe the Ampere implementation.
+
+Additional production-batch measurements on one GPU were 30.87 TMAC/s for the shipped BM64/BN128/BK128, four-warp, one-stage shape; 28.11 for two stages; 30.84 for three stages; 30.55 for BK64; and 27.82 for BK32. These variations did not close the gap to Forge. The default binary remains BM64/BN128/BK128, four warps, one stage. A substantially different sm_86 compute kernel is the next performance task.
