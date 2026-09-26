@@ -1,6 +1,7 @@
 #include "cp_pool.h"
 #include "cp_config.h"
 #include "cp_job_ctrl.h"
+#include "cp_proof.h"
 #include "cp_platform.h"
 #include "cp_state.h"
 #include "cp_util.h"
@@ -280,21 +281,33 @@ int cp_pool_send_authorize(int msg_id, const char* wallet,
 int cp_pool_send_plain_proof_submit(int sock, int msg_id, const char* job_id,
                                     const char* plain_b64, double hs)
 {
-    size_t blen = plain_b64 ? strlen(plain_b64) : 0;
+    (void)hs;
+    char* kryptex_b64 = (char*)malloc(PLAIN_PROOF_B64_MAX);
+    if(!kryptex_b64) return 0;
+    char err[256] = {0};
+    if(cp_proof_encode_kryptex(plain_b64, kryptex_b64,
+                               PLAIN_PROOF_B64_MAX, err, sizeof(err)) != 0){
+        fprintf(stderr, "[net] Kryptex proof encoding failed: %s\n", err);
+        free(kryptex_b64);
+        return 0;
+    }
+    size_t blen = strlen(kryptex_b64);
     size_t need = blen + 256;
     char* sub = (char*)malloc(need);
     if(!sub){
         fprintf(stderr, "[net] plain_proof submit OOM (%zu b64 bytes)\n", blen);
+        free(kryptex_b64);
         return 0;
     }
     int nw = snprintf(sub, need,
         "{\"id\":%d,\"method\":\"mining.submit\","
         "\"params\":{\"job_id\":\"%s\",\"plain_proof\":\"%s\"}}",
-        msg_id, job_id, plain_b64);
+        msg_id, job_id, kryptex_b64);
     if(nw < 0 || (size_t)nw >= need){
         fprintf(stderr, "[net] plain_proof submit JSON too large (b64=%zu need>=%zu)\n",
                 blen, need);
         free(sub);
+        free(kryptex_b64);
         return 0;
     }
     printf("[net] plain_proof submit job=%s b64_len=%zu json_len=%d hs=%.0f\n",
@@ -302,6 +315,7 @@ int cp_pool_send_plain_proof_submit(int sock, int msg_id, const char* job_id,
     fflush(stdout);
     int ok = cp_send_json(sock, sub);
     free(sub);
+    free(kryptex_b64);
     return ok;
 }
 

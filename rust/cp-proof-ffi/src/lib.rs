@@ -186,6 +186,54 @@ fn write_err(out: Option<&mut [u8]>, msg: &str) {
     }
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn cp_proof_encode_kryptex(
+    raw_b64: *const std::ffi::c_char,
+    out_b64: *mut std::ffi::c_char,
+    out_cap: usize,
+    err: *mut u8,
+    err_cap: usize,
+) -> i32 {
+    use flate2::{write::GzEncoder, Compression};
+    use std::io::Write;
+
+    let err_slice = if err.is_null() || err_cap == 0 {
+        None
+    } else {
+        Some(std::slice::from_raw_parts_mut(err, err_cap))
+    };
+    let fail = |message: String| {
+        write_err(err_slice, &message);
+        -1
+    };
+    if raw_b64.is_null() || out_b64.is_null() || out_cap == 0 {
+        return fail("null pointer or empty output buffer".into());
+    }
+    let input = match std::ffi::CStr::from_ptr(raw_b64).to_str() {
+        Ok(value) => value,
+        Err(e) => return fail(format!("invalid base64 text: {e}")),
+    };
+    let raw = match STANDARD.decode(input) {
+        Ok(value) => value,
+        Err(e) => return fail(format!("base64 decode: {e}")),
+    };
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    if let Err(e) = encoder.write_all(&raw) {
+        return fail(format!("gzip write: {e}"));
+    }
+    let compressed = match encoder.finish() {
+        Ok(value) => value,
+        Err(e) => return fail(format!("gzip finish: {e}")),
+    };
+    let encoded = STANDARD.encode(compressed);
+    if encoded.len() >= out_cap {
+        return fail(format!("output buffer too small: need {}", encoded.len() + 1));
+    }
+    std::ptr::copy_nonoverlapping(encoded.as_ptr(), out_b64.cast::<u8>(), encoded.len());
+    *out_b64.add(encoded.len()) = 0;
+    0
+}
+
 /// Build plain_proof base64. Returns 0 on success, -1 on error.
 ///
 /// `tile_layout`: 0 = BzMiner scattered 8x16, 1 = contiguous 8x16, 2 = CUTLASS Case 9 MMA 8x8,

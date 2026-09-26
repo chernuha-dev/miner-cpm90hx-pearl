@@ -42,6 +42,14 @@ int cp_proof_build(
     char* err,
     size_t err_cap);
 
+/* Kryptex v2 transports gzip(bincode PlainProof) encoded as base64. */
+int cp_proof_encode_kryptex(
+    const char* raw_b64,
+    char* out_b64,
+    size_t out_cap,
+    char* err,
+    size_t err_cap);
+
 /* Verify plain_proof base64 against pool share target (32-byte BE U256, unscaled).
  * cert_version: 1/2 = legacy noise seeds, 3 = salted (V3). Returns 0 on ok. */
 int cp_proof_verify(
