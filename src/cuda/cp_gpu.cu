@@ -5,6 +5,7 @@
 #include "cp_util.h"
 
 #include <cuda_runtime.h>
+#include <cuda.h>
 #if defined(CP_ENABLE_CUBLAS) && CP_ENABLE_CUBLAS
 #include <cublas_v2.h>
 #endif
@@ -24,6 +25,7 @@
 #include "cp_cutlass.h"
 #include "plain_proof_kernel.cuh"
 #include "plain_proof_period.cuh"
+#include "ampere_transcript.cuh"
 
 #define CU_CHECK(call) do { \
     cudaError_t _e = (call); \
@@ -68,6 +70,10 @@ typedef struct {
     size_t    C_hist_cap;
     uint32_t* d_tile_xor;
     size_t    tile_xor_cap;
+    uint32_t* d_ampere_transcript;
+    size_t    ampere_transcript_cap;
+    CUmodule  ampere_module;
+    CUfunction ampere_scan;
 #if defined(CP_ENABLE_CUBLAS) && CP_ENABLE_CUBLAS
     cublasHandle_t cublas;
 #endif
@@ -82,6 +88,7 @@ static int g_period_gemm = 1;
 static int g_row_period_batch = CP_ROW_PERIOD_BATCH_DEFAULT;
 static int g_col_period_batch = CP_PERIOD_BATCH_DEFAULT;
 static int g_step_major_ap = 0; /* Case 10 default; main sets 1 for cuBLAS period */
+static int g_ampere_tc = 0;
 /* Cert V3: bind Merkle roots with m/n before noise-seed chain. Set by begin_job. */
 static int g_salted = 1;
 
@@ -302,6 +309,11 @@ void cp_gpu_set_cutlass_fused(int on)
         g_gpus[i].use_cutlass_fused = g_cutlass_fused;
 }
 
+void cp_gpu_set_ampere_tc(int on)
+{
+    g_ampere_tc = on ? 1 : 0;
+}
+
 void cp_gpu_begin_job(const uint8_t job_key[32], int m, int n, uint32_t cert_version)
 {
     g_salted = (cert_version >= 3) ? 1 : 0;
@@ -337,6 +349,27 @@ void cp_gpu_init(int* devs, int ndev)
                     g->dev);
             exit(1);
         }
+        if(g_ampere_tc){
+            cudaDeviceProp prop;
+            CU_CHECK(cudaGetDeviceProperties(&prop, g->dev));
+            if(prop.major != 8 || prop.minor != 6 || !g_step_major_ap || g_cutlass_fused){
+                fprintf(stderr, "[gpu] --ampere-tc requires sm_86, step-major, and no CUTLASS fused path\n");
+                exit(1);
+            }
+            const char* path = getenv("CP_AMPERE_CUBIN");
+            if(!path || !*path) path = "kernels/ampere_sm86.cubin";
+            CU_CHECK(cudaFree(0)); /* ensure the runtime primary context is current */
+            CUresult rc = cuInit(0);
+            if(rc == CUDA_SUCCESS) rc = cuModuleLoad(&g->ampere_module, path);
+            if(rc == CUDA_SUCCESS)
+                rc = cuModuleGetFunction(&g->ampere_scan, g->ampere_module,
+                                         "ampere_scan");
+            if(rc != CUDA_SUCCESS){
+                fprintf(stderr, "[gpu] cannot load Ampere cubin %s (CUDA driver error %d)\n",
+                        path, (int)rc);
+                exit(1);
+            }
+        }
         CU_CHECK(cudaMalloc(&g->d_found, sizeof(int)));
         CU_CHECK(cudaMalloc(&g->d_out_t_rows, sizeof(int)));
         CU_CHECK(cudaMalloc(&g->d_out_t_cols, sizeof(int)));
@@ -349,7 +382,8 @@ void cp_gpu_init(int* devs, int ndev)
 #endif
         g->use_cutlass_fused = g_cutlass_fused;
         printf("[gpu] GPU%d OK (%s, blocking sync)\n", g->dev,
-               g->use_cutlass_fused ? "CUTLASS fused period GEMM"
+               g_ampere_tc ? "Ampere tensor-core transcript"
+               : g->use_cutlass_fused ? "CUTLASS fused period GEMM"
                : (g->use_cublas_period ? "cuBLAS int8 period GEMM"
                                        : "CUDA period GEMM"));
         fflush(stdout);
@@ -406,6 +440,8 @@ void cp_gpu_shutdown(void)
         if(g->d_a_key8) cudaFree(g->d_a_key8);
         if(g->d_C_hist) cudaFree(g->d_C_hist);
         if(g->d_tile_xor) cudaFree(g->d_tile_xor);
+        if(g->d_ampere_transcript) cudaFree(g->d_ampere_transcript);
+        if(g->ampere_module) cuModuleUnload(g->ampere_module);
 #if defined(CP_ENABLE_CUBLAS) && CP_ENABLE_CUBLAS
         if(g->cublas){ cublasDestroy(g->cublas); g->cublas = NULL; }
 #endif
@@ -465,7 +501,16 @@ static void ensure_buffers(GpuCtx* g, int m, int n)
         }
     }
     {
-        if(g->use_cutlass_fused){
+        if(g_ampere_tc){
+            const size_t need = (size_t)g_row_period_batch
+                              * (size_t)g_col_period_batch
+                              * 256u * 16u * sizeof(uint32_t);
+            if(need > g->ampere_transcript_cap){
+                if(g->d_ampere_transcript) cudaFree(g->d_ampere_transcript);
+                CU_CHECK(cudaMalloc(&g->d_ampere_transcript, need));
+                g->ampere_transcript_cap = need;
+            }
+        } else if(g->use_cutlass_fused){
         /* Jackpot runs in CUTLASS mainloop tail; no tile_xor buffer. */
     } else {
             size_t hist_need = pp_hist_batch_bytes(
@@ -718,6 +763,24 @@ static void gpu_period_gemm_batch(
     int row_batch_count, int col_batch_count,
     const uint32_t bound[8])
 {
+    if(g_ampere_tc){
+        int row0 = row_period0;
+        int col0 = col_period0;
+        uint32_t* transcript = g->d_ampere_transcript;
+        const int block_threads = 256;
+        void* args[] = {&g->d_Ap, &g->d_BpT, &transcript,
+                        &m, &n, &row0, &col0};
+        CUresult rc = cuLaunchKernel(
+            g->ampere_scan,
+            (unsigned)row_batch_count, (unsigned)(col_batch_count * 2), 1,
+            block_threads, 1, 1, 32768, 0, args, nullptr);
+        if(rc != CUDA_SUCCESS){
+            fprintf(stderr, "[gpu] Ampere transcript kernel launch failed (CUDA driver error %d)\n",
+                    (int)rc);
+            exit(1);
+        }
+        return;
+    }
     if(g->use_cutlass_fused){
         const size_t tiles_per_batch = cp_cutlass_tiles_per_batch(
             row_batch_count, col_batch_count);
@@ -1196,6 +1259,17 @@ static void launch_jackpot_batch(
     int row_period0, int col_period0, int m, int n,
     const uint32_t bound[8])
 {
+    if(g_ampere_tc){
+        const int count = pp_batch_hash_tiles(row_batch_count, col_batch_count);
+        cp_ampere_transcript_jackpot_kernel<<<(count + 255) / 256, 256>>>(
+            g->d_ampere_transcript, row_batch_count, col_batch_count,
+            row_period0, col_period0,
+            bound[0], bound[1], bound[2], bound[3],
+            bound[4], bound[5], bound[6], bound[7],
+            g->d_a_key8, g->d_out_t_rows, g->d_out_t_cols, g->d_found);
+        CU_CHECK(cudaGetLastError());
+        return;
+    }
     if(g->use_cutlass_fused)
         return;
 
@@ -1223,13 +1297,13 @@ static PeriodBatchTimes profile_period_batch_timed(
     CU_CHECK(cudaMemcpy(g->d_found, &zero, sizeof(int), cudaMemcpyHostToDevice));
 
 #if defined(CP_ENABLE_CUBLAS) && CP_ENABLE_CUBLAS
-    if(g->use_cublas_period && !g->use_cutlass_fused){
+    if(g->use_cublas_period && !g->use_cutlass_fused && !g_ampere_tc){
         PeriodCublasBreakdown cb = gpu_period_gemm_cublas_batch_timed(
             g, m, n, rpi0, cpi0, row_batch_count, col_batch_count);
         t.gemm_ex_ms = cb.gemm_ex_ms;
     } else
 #endif
-    if(!g->use_cutlass_fused) {
+    if(!g->use_cutlass_fused && !g_ampere_tc) {
         CU_CHECK(cudaEventRecord(ev[0]));
         gpu_period_gemm_cuda_batch(
             g, m, n, rpi0, cpi0, row_batch_count, col_batch_count);
@@ -1497,7 +1571,8 @@ int cp_gpu_run_scan_profile(int dev, int m, int n, int warmup, int runs)
         CU_CHECK(cudaMemcpy(g->d_found, &zero, sizeof(int), cudaMemcpyHostToDevice));
     }
 
-    const char* gemm_mode = g->use_cutlass_fused ? "CUTLASS fused GEMM"
+    const char* gemm_mode = g_ampere_tc ? "Ampere tensor-core transcript"
+                            : g->use_cutlass_fused ? "CUTLASS fused GEMM"
                             : (g->use_cublas_period ? "cuBLAS int8 fat"
                                                     : "CUDA period GEMM");
     const int rpi0 = 0;

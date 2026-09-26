@@ -77,6 +77,7 @@ static void print_usage(void)
     printf("  --step-major         step-major Ap/BpT panels (lda=%d; cuBLAS period default)\n",
            R_RANK);
     printf("  --cutlass-fused      fused CUTLASS GEMM + jackpot (CUDA default)\n");
+    printf("  --ampere-tc         sm_86 tensor-core transcript scan (experimental)\n");
 #if defined(CP_ENABLE_CUBLAS) && CP_ENABLE_CUBLAS
     printf("  --cublas-period      debug: cuBLAS period GEMM + separate XOR/jackpot\n");
 #endif
@@ -209,6 +210,7 @@ int main(int argc, char** argv)
     int step_major_ap = -1; /* -1 = unset; CUTLASS→row-major, cuBLAS period→step-major */
     /* -1 = unset; CUDA defaults to fused CUTLASS, other backends force off. */
     int cutlass_fused = -1;
+    int ampere_tc = 0;
     CpPrepackMode prepack_mode = CP_PREPACK_SEPARATE;
     CpSimdIsa simd_isa = CP_SIMD_AUTO;
     int simd_env_invalid = 0;
@@ -373,6 +375,13 @@ int main(int argc, char** argv)
             step_major_ap = 1;
         } else if(!strcmp(argv[i], "--cutlass-fused")){
             cutlass_fused = 1;
+        } else if(!strcmp(argv[i], "--ampere-tc")){
+#if defined(CP_ENABLE_CUDA) && CP_ENABLE_CUDA
+            ampere_tc = 1;
+#else
+            fprintf(stderr, "--ampere-tc requires a CUDA build\n");
+            return 1;
+#endif
         } else if(!strcmp(argv[i], "--cublas-period")){
 #if defined(CP_ENABLE_CUBLAS) && CP_ENABLE_CUBLAS
             cutlass_fused = 0;
@@ -539,6 +548,17 @@ int main(int argc, char** argv)
      * Step-major falls back to Case 9 wind_down; cuBLAS period / Case 7.2 packing. */
     if(step_major_ap < 0)
         step_major_ap = cutlass_fused ? 0 : 1;
+    if(ampere_tc){
+        if(cp_worker_backend_id() != CP_BACKEND_CUDA || no_period_gemm){
+            fprintf(stderr, "--ampere-tc requires CUDA period GEMM\n");
+            return 1;
+        }
+        cutlass_fused = 0;
+        step_major_ap = 1;
+#if defined(CP_ENABLE_CUDA) && CP_ENABLE_CUDA
+        cp_gpu_set_ampere_tc(1);
+#endif
+    }
 
     cp_worker_apply_backend_defaults();
 
@@ -776,6 +796,8 @@ int main(int argc, char** argv)
             if(cutlass_fused){
                 printf("[mode] proof rows/cols: 8 A + 8 B^T (interleaved 4x4)\n");
                 printf("[mode] scan: CUTLASS Case 10 fused GEMM + inline XOR jackpot\n");
+            } else if(ampere_tc){
+                printf("[mode] scan: sm_86 tensor-core GEMM + 8x16 transcript, CUDA BLAKE3\n");
             } else {
                 printf("[mode] scan: %s\n",
                        (contiguous || no_period_gemm) ? "per-tile kernel"
@@ -800,7 +822,11 @@ int main(int argc, char** argv)
             printf("[mode] Ap/BpT layout: %s (lda=%d)\n",
                    step_major_ap ? "step-major panels" : "row-major strided",
                    step_major_ap ? R_RANK : K_DIM);
-            if(cutlass_fused){
+            if(ampere_tc){
+                printf("[mode] jackpot: CUDA BLAKE3 after tensor-core transcript\n");
+                printf("[mode] period batch: row=%d col=%d\n",
+                       row_period_batch, period_batch);
+            } else if(cutlass_fused){
                 printf("[mode] jackpot: fused in GEMM kernel (no tile_xor / C_hist)\n");
                 printf("[mode] period batch: row=%d col=%d\n",
                        row_period_batch, period_batch);

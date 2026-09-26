@@ -269,7 +269,7 @@ add_executable(cppminer ${CP_SOURCES})
 target_include_directories(cppminer PRIVATE ${CP_INCLUDE_DIRS})
 
 if(CP_ENABLE_CUDA)
-    target_link_libraries(cppminer PRIVATE CUDA::cudart)
+    target_link_libraries(cppminer PRIVATE CUDA::cudart CUDA::cuda_driver)
     if(CP_ENABLE_CUBLAS)
         target_link_libraries(cppminer PRIVATE CUDA::cublas)
     endif()
