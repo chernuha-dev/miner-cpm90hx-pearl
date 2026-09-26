@@ -1,4 +1,3 @@
-#include <algorithm>
 #include <cstdio>
 #include <cstdint>
 #include <random>
@@ -60,17 +59,19 @@ int main() {
         }
     }
     for (int step = 0; step < 16; ++step) {
-        auto first_got = got.begin() + step * 256;
-        auto first_expected = expected.begin() + step * 256;
-        std::sort(first_got, first_got + 256);
-        std::sort(first_expected, first_expected + 256);
-        if (!std::equal(first_got, first_got + 256, first_expected)) {
-            int errors = 0;
-            for (int i = 0; i < 256; ++i)
-                errors += got[step * 256 + i] != expected[step * 256 + i];
-            fprintf(stderr, "step %d: %d mismatched sorted transcript words\n",
-                    step, errors);
-            return 1;
+        for (int row_tile = 0; row_tile < 16; ++row_tile) {
+            for (int col_tile = 0; col_tile < 16; ++col_tile) {
+                const int warp = (col_tile / 4) * 2 + row_tile / 8;
+                const int lane = (row_tile % 8) * 4 + col_tile % 4;
+                const int thread = warp * 32 + lane;
+                const int tile = row_tile * 16 + col_tile;
+                if (got[step * 256 + thread] != expected[step * 256 + tile]) {
+                    fprintf(stderr, "step %d tile (%d,%d) thread %d: got %08x expected %08x\n",
+                            step, row_tile, col_tile, thread,
+                            got[step * 256 + thread], expected[step * 256 + tile]);
+                    return 1;
+                }
+            }
         }
     }
     cudaFuncAttributes attr{};
