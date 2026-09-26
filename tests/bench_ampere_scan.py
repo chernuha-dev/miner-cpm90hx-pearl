@@ -52,6 +52,37 @@ def main() -> None:
         print(f"{name} regs={kernel.n_regs} shared={kernel.metadata.shared} "
               f"median={elapsed_ms:.3f} ms rate={mac / (elapsed_ms * 1e-3) / 1e12:.2f} TMAC/s", flush=True)
 
+    for bm, bn, warps in ((32, 256, 4), (64, 256, 4), (64, 256, 8),
+                          (128, 128, 4), (128, 128, 8),
+                          (128, 256, 8), (128, 256, 16)):
+        grid = (row_batch * 128 // bm, col_batch * 256 // bn)
+        output = cp.empty((grid[0], grid[1], bn), dtype=cp.int32)
+
+        def wide_launch():
+            return ampere_dot_probe[grid](
+                _Ptr(a, tl.int8), _Ptr(b, tl.int8), _Ptr(output, tl.int32),
+                m, n, 0, 0, BM=bm, BN=bn, num_warps=warps, num_stages=1)
+
+        try:
+            kernel = wide_launch()
+            wide_launch()
+            cp.cuda.runtime.deviceSynchronize()
+            samples = []
+            for _ in range(5):
+                start, stop = cp.cuda.Event(), cp.cuda.Event()
+                start.record()
+                wide_launch()
+                stop.record()
+                stop.synchronize()
+                samples.append(cp.cuda.get_elapsed_time(start, stop))
+            samples.sort()
+            elapsed_ms = samples[len(samples) // 2]
+            print(f"dot shape BM={bm} BN={bn} warps={warps} "
+                  f"regs={kernel.n_regs} shared={kernel.metadata.shared} "
+                  f"median={elapsed_ms:.3f} ms rate={mac / (elapsed_ms * 1e-3) / 1e12:.2f} TMAC/s", flush=True)
+        except Exception as exc:
+            print(f"dot shape BM={bm} BN={bn} warps={warps}: {exc}", flush=True)
+
     for bm, bn, bk, warps, stages in ((64, 128, 128, 4, 1),
                                        (64, 128, 128, 4, 2),
                                        (64, 128, 128, 4, 3),
