@@ -88,6 +88,6 @@ def build_cubin(output: Path, bm: int = 64) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, default=Path("kernels/ampere_sm86.cubin"))
-    parser.add_argument("--bm", type=int, choices=(64, 128), default=64)
+    parser.add_argument("--bm", type=int, choices=(32, 64, 128), default=64)
     args = parser.parse_args()
     build_cubin(args.output, args.bm)

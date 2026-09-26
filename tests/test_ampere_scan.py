@@ -30,7 +30,7 @@ def main() -> None:
     a, b = cp.asarray(a_host), cp.asarray(b_host)
     row_pattern = [(u // 2) * 32 + (u % 2) * 8 for u in range(8)]
     col_pattern = [(v // 2) * 32 + (v % 2) for v in range(16)]
-    for bm in (64, 128):
+    for bm in (32, 64, 128):
         transcript = cp.empty((2, 16, 128), dtype=cp.uint32)
         ampere_scan[(128 // bm, 2)](
             _Ptr(a, tl.int8), _Ptr(b, tl.int8), _Ptr(transcript, tl.uint32),
