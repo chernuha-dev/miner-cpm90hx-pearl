@@ -20,6 +20,7 @@ def ampere_scan(
     BM: tl.constexpr = 128,
     BN: tl.constexpr = 128,
     BK: tl.constexpr = 128,
+    ROW_FIRST: tl.constexpr = False,
 ):
     row_split = 128 // BM
     col_split = 256 // BN
@@ -54,8 +55,12 @@ def ampere_scan(
                 acc = tl.dot(a, b, acc)
 
         tile_xor = tl.reshape(acc.to(tl.uint32), (BM // 8, 8, BN // 16, 16))
-        tile_xor = tl.xor_sum(tile_xor, 3)
-        tile_xor = tl.xor_sum(tile_xor, 1)
+        if ROW_FIRST:
+            tile_xor = tl.xor_sum(tile_xor, 1)
+            tile_xor = tl.xor_sum(tile_xor, 2)
+        else:
+            tile_xor = tl.xor_sum(tile_xor, 3)
+            tile_xor = tl.xor_sum(tile_xor, 1)
         tile_xor = tl.reshape(tile_xor, (BM * BN // 128,))
         tile = tl.arange(0, BM * BN // 128)
         local_col = tile % (BN // 16)
