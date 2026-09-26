@@ -72,6 +72,7 @@ int main() {
     cudaMemcpy(out.data(), dout, out.size() * sizeof(int32_t), cudaMemcpyDeviceToHost);
     std::vector<int> seen(128 * 256, 0);
     int single_tile_threads = 0;
+    int identity_tile_threads = 0;
     bool tile_seen[256] = {};
     for (int tid = 0; tid < 256; ++tid) {
         int tile = -1;
@@ -92,6 +93,7 @@ int main() {
             if (tile != t) same_tile = false;
         }
         single_tile_threads += same_tile;
+        identity_tile_threads += same_tile && tile == tid;
         if (same_tile) {
             if (tile_seen[tile]) {
                 fprintf(stderr, "duplicate logical tile %d\n", tile);
@@ -99,7 +101,7 @@ int main() {
             }
             tile_seen[tile] = true;
         }
-        if (tid < 4) {
+        if (tid < 32 || tid % 32 == 0) {
             int nr = 0, nc = 0;
             for (bool v : row_seen) nr += v;
             for (bool v : col_seen) nc += v;
@@ -120,8 +122,9 @@ int main() {
         missing += count == 0;
         duplicated += count > 1;
     }
-    printf("single_tile_threads=%d/256 unique=%d missing=%d duplicated=%d\n",
-           single_tile_threads, unique, missing, duplicated);
+    printf("single_tile_threads=%d/256 identity_tile_threads=%d/256 "
+           "unique=%d missing=%d duplicated=%d\n",
+           single_tile_threads, identity_tile_threads, unique, missing, duplicated);
     cudaFree(da); cudaFree(db); cudaFree(dout);
     return unique == 128 * 256 && single_tile_threads == 256 ? 0 : 1;
 }
