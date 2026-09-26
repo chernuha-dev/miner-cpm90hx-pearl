@@ -11,7 +11,8 @@ __global__ void cp_ampere_transcript_jackpot_kernel(
     const uint32_t* __restrict__ a_key8,
     int* __restrict__ out_t_rows,
     int* __restrict__ out_t_cols,
-    int* __restrict__ found_flag)
+    int* __restrict__ found_flag,
+    int register_layout)
 {
     const int idx = (int)(blockIdx.x * blockDim.x + threadIdx.x);
     const int tiles_per_period = 256;
@@ -29,10 +30,16 @@ __global__ void cp_ampere_transcript_jackpot_kernel(
     const int cta = row_in_batch * (col_batch_count * 2)
                   + col_in_batch * 2 + half;
 
+    const int warp = (col_tile / 4) * 2 + row_tile / 8;
+    const int lane = (row_tile % 8) * 4 + col_tile % 4;
+    const int register_thread = warp * 32 + lane;
     uint32_t msg[16];
     #pragma unroll
     for(int step = 0; step < 16; step++)
-        msg[step] = transcript[((size_t)cta * 16 + step) * 128 + tile_in_half];
+        msg[step] = register_layout
+            ? transcript[(((size_t)row_in_batch * col_batch_count + col_in_batch)
+                          * 16 + step) * 256 + register_thread]
+            : transcript[((size_t)cta * 16 + step) * 128 + tile_in_half];
 
     uint32_t digest[8];
     b3_compress64(a_key8, msg, digest);

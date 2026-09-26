@@ -78,6 +78,7 @@ static void print_usage(void)
            R_RANK);
     printf("  --cutlass-fused      fused CUTLASS GEMM + jackpot (CUDA default)\n");
     printf("  --ampere-tc         sm_86 tensor-core transcript scan (experimental)\n");
+    printf("  --ampere-register   sm_86 register-local CUTLASS transcript scan (experimental)\n");
 #if defined(CP_ENABLE_CUBLAS) && CP_ENABLE_CUBLAS
     printf("  --cublas-period      debug: cuBLAS period GEMM + separate XOR/jackpot\n");
 #endif
@@ -211,6 +212,7 @@ int main(int argc, char** argv)
     /* -1 = unset; CUDA defaults to fused CUTLASS, other backends force off. */
     int cutlass_fused = -1;
     int ampere_tc = 0;
+    int ampere_register = 0;
     CpPrepackMode prepack_mode = CP_PREPACK_SEPARATE;
     CpSimdIsa simd_isa = CP_SIMD_AUTO;
     int simd_env_invalid = 0;
@@ -380,6 +382,14 @@ int main(int argc, char** argv)
             ampere_tc = 1;
 #else
             fprintf(stderr, "--ampere-tc requires a CUDA build\n");
+            return 1;
+#endif
+        } else if(!strcmp(argv[i], "--ampere-register")){
+#if defined(CP_ENABLE_CUDA) && CP_ENABLE_CUDA
+            ampere_tc = 1;
+            ampere_register = 1;
+#else
+            fprintf(stderr, "--ampere-register requires a CUDA build\n");
             return 1;
 #endif
         } else if(!strcmp(argv[i], "--cublas-period")){
@@ -557,6 +567,7 @@ int main(int argc, char** argv)
         step_major_ap = 1;
 #if defined(CP_ENABLE_CUDA) && CP_ENABLE_CUDA
         cp_gpu_set_ampere_tc(1);
+        cp_gpu_set_ampere_register(ampere_register);
 #endif
     }
 

@@ -26,6 +26,7 @@
 #include "plain_proof_kernel.cuh"
 #include "plain_proof_period.cuh"
 #include "ampere_transcript.cuh"
+#include "cutlass_sm86_transcript.cuh"
 
 #define CU_CHECK(call) do { \
     cudaError_t _e = (call); \
@@ -49,6 +50,8 @@ typedef struct {
     int       dev;
     int8_t*   d_Ap;
     int8_t*   d_BpT;
+    int8_t*   d_A_perm;
+    int8_t*   d_B_perm;
     int8_t*   d_A_sig;
     int8_t*   d_Bt_sig;
     uint32_t* d_e_ar;
@@ -89,6 +92,7 @@ static int g_row_period_batch = CP_ROW_PERIOD_BATCH_DEFAULT;
 static int g_col_period_batch = CP_PERIOD_BATCH_DEFAULT;
 static int g_step_major_ap = 0; /* Case 10 default; main sets 1 for cuBLAS period */
 static int g_ampere_tc = 0;
+static int g_ampere_register = 0;
 /* Cert V3: bind Merkle roots with m/n before noise-seed chain. Set by begin_job. */
 static int g_salted = 1;
 
@@ -314,6 +318,11 @@ void cp_gpu_set_ampere_tc(int on)
     g_ampere_tc = on ? 1 : 0;
 }
 
+void cp_gpu_set_ampere_register(int on)
+{
+    g_ampere_register = on ? 1 : 0;
+}
+
 void cp_gpu_begin_job(const uint8_t job_key[32], int m, int n, uint32_t cert_version)
 {
     g_salted = (cert_version >= 3) ? 1 : 0;
@@ -356,18 +365,20 @@ void cp_gpu_init(int* devs, int ndev)
                 fprintf(stderr, "[gpu] --ampere-tc requires sm_86, step-major, and no CUTLASS fused path\n");
                 exit(1);
             }
-            const char* path = getenv("CP_AMPERE_CUBIN");
-            if(!path || !*path) path = "kernels/ampere_sm86.cubin";
-            CU_CHECK(cudaFree(0)); /* ensure the runtime primary context is current */
-            CUresult rc = cuInit(0);
-            if(rc == CUDA_SUCCESS) rc = cuModuleLoad(&g->ampere_module, path);
-            if(rc == CUDA_SUCCESS)
-                rc = cuModuleGetFunction(&g->ampere_scan, g->ampere_module,
-                                         "ampere_scan");
-            if(rc != CUDA_SUCCESS){
-                fprintf(stderr, "[gpu] cannot load Ampere cubin %s (CUDA driver error %d)\n",
-                        path, (int)rc);
-                exit(1);
+            if(!g_ampere_register){
+                const char* path = getenv("CP_AMPERE_CUBIN");
+                if(!path || !*path) path = "kernels/ampere_sm86.cubin";
+                CU_CHECK(cudaFree(0)); /* ensure the runtime primary context is current */
+                CUresult rc = cuInit(0);
+                if(rc == CUDA_SUCCESS) rc = cuModuleLoad(&g->ampere_module, path);
+                if(rc == CUDA_SUCCESS)
+                    rc = cuModuleGetFunction(&g->ampere_scan, g->ampere_module,
+                                             "ampere_scan");
+                if(rc != CUDA_SUCCESS){
+                    fprintf(stderr, "[gpu] cannot load Ampere cubin %s (CUDA driver error %d)\n",
+                            path, (int)rc);
+                    exit(1);
+                }
             }
         }
         CU_CHECK(cudaMalloc(&g->d_found, sizeof(int)));
@@ -382,7 +393,8 @@ void cp_gpu_init(int* devs, int ndev)
 #endif
         g->use_cutlass_fused = g_cutlass_fused;
         printf("[gpu] GPU%d OK (%s, blocking sync)\n", g->dev,
-               g_ampere_tc ? "Ampere tensor-core transcript"
+               g_ampere_register ? "Ampere CUTLASS register transcript"
+               : g_ampere_tc ? "Ampere tensor-core transcript"
                : g->use_cutlass_fused ? "CUTLASS fused period GEMM"
                : (g->use_cublas_period ? "cuBLAS int8 period GEMM"
                                        : "CUDA period GEMM"));
@@ -421,6 +433,8 @@ void cp_gpu_shutdown(void)
         CU_CHECK(cudaSetDevice(g->dev));
         if(g->d_Ap) cudaFree(g->d_Ap);
         if(g->d_BpT) cudaFree(g->d_BpT);
+        if(g->d_A_perm) cudaFree(g->d_A_perm);
+        if(g->d_B_perm) cudaFree(g->d_B_perm);
         if(g->d_A_sig) cudaFree(g->d_A_sig);
         if(g->d_Bt_sig) cudaFree(g->d_Bt_sig);
         if(g->d_e_ar) cudaFree(g->d_e_ar);
@@ -469,6 +483,10 @@ static void ensure_buffers(GpuCtx* g, int m, int n)
          * Zero-B path skips d_Bt_sig (~512 MiB); allocate on demand for --cpu-gen / tests. */
         CU_CHECK(cudaMalloc(&g->d_Ap, szAp));
         CU_CHECK(cudaMalloc(&g->d_BpT, szBpT));
+        if(g_ampere_register){
+            CU_CHECK(cudaMalloc(&g->d_A_perm, szAp));
+            CU_CHECK(cudaMalloc(&g->d_B_perm, szBpT));
+        }
         CU_CHECK(cudaMalloc(&g->d_A_sig, szAp));
         g->d_Bt_sig = nullptr;
         CU_CHECK(cudaMalloc(&g->d_e_ar, (size_t)K_DIM * 2 * sizeof(uint32_t)));
@@ -579,6 +597,11 @@ static void gpu_noise_apply_a(GpuCtx* g, int m)
             g->d_A_sig, g->d_eal, g->d_Ap, m, K_DIM, R_RANK, g->d_e_ar);
     }
     CU_CHECK(cudaGetLastError());
+    if(g_ampere_register){
+        const size_t total = (size_t)16 * m * R_RANK;
+        pearl_perm_a<<<(total + 255) / 256, 256>>>(g->d_Ap, g->d_A_perm, m);
+        CU_CHECK(cudaGetLastError());
+    }
 }
 
 /* signal may be NULL (zero-B: noise-only into d_BpT). */
@@ -595,6 +618,11 @@ static void gpu_noise_apply_b(GpuCtx* g, int n, const int8_t* d_bt_sig)
             d_bt_sig, g->d_ebr, g->d_BpT, n, K_DIM, R_RANK, g->d_e_bl);
     }
     CU_CHECK(cudaGetLastError());
+    if(g_ampere_register){
+        const size_t total = (size_t)16 * n * R_RANK;
+        pearl_perm_b<<<(total + 255) / 256, 256>>>(g->d_BpT, g->d_B_perm, n);
+        CU_CHECK(cudaGetLastError());
+    }
 }
 
 static void gpu_noise_apply(GpuCtx* g, int m, int n)
@@ -764,6 +792,14 @@ static void gpu_period_gemm_batch(
     const uint32_t bound[8])
 {
     if(g_ampere_tc){
+        if(g_ampere_register){
+            pearl_cutlass_transcript<<<dim3(row_batch_count, col_batch_count),
+                                       256, sizeof(PearlTensorMma::SharedStorage)>>>(
+                g->d_A_perm, g->d_B_perm, g->d_ampere_transcript,
+                m, n, row_period0, col_period0);
+            CU_CHECK(cudaGetLastError());
+            return;
+        }
         int row0 = row_period0;
         int col0 = col_period0;
         uint32_t* transcript = g->d_ampere_transcript;
@@ -1254,7 +1290,8 @@ static void launch_jackpot_batch(
             row_period0, col_period0,
             bound[0], bound[1], bound[2], bound[3],
             bound[4], bound[5], bound[6], bound[7],
-            g->d_a_key8, g->d_out_t_rows, g->d_out_t_cols, g->d_found);
+            g->d_a_key8, g->d_out_t_rows, g->d_out_t_cols, g->d_found,
+            g_ampere_register);
         CU_CHECK(cudaGetLastError());
         return;
     }

@@ -167,6 +167,7 @@ if(CP_ENABLE_CUDA)
         src/cuda/cp_cuda_worker.cpp
     )
     list(APPEND CP_INCLUDE_DIRS
+        ${CMAKE_SOURCE_DIR}/kernels
         ${CMAKE_SOURCE_DIR}/src/cuda/cutlass
         ${CMAKE_SOURCE_DIR}/third_party/cutlass_override
         ${CMAKE_SOURCE_DIR}/third_party/cutlass/include
