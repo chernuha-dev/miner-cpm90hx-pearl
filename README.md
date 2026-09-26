@@ -1,10 +1,14 @@
 # Pearl miner for two CMP 90HX
 
+Work in progress. The CUDA miner source is now in this repository; **it has not yet produced an accepted Kryptex share**. Forge Miner remains the production fallback on the rig.
+
+The implementation starts from [CPPminer](https://github.com/1640675651/CPPminer) at commit `6785ad349a33f7bebb3ffe1dc1ad876b56d66ef8` under its MIT license. See [LICENSE](LICENSE). We are adapting its protocol, proof encoding, and CUDA path for current Pearl and Kryptex.
+
 Target rig: HiveOS, Kryptex pool, two NVIDIA CMP 90HX. Current Forge Miner baseline: 62.5 + 63.9 = **126.4 TH/s** at **360 W** total (0.351 TH/s/W). These are the numbers to beat using **pool-accepted shares**, not only the miner's local speed display.
 
-## First step: capture the rig environment
+## Rig environment
 
-Run `bash scripts/rig_probe.sh` on the rig and share its output. The script reads hardware and toolchain details; it does not read wallet addresses, pool passwords, or miner config files. In particular, we need the CUDA compute capability, driver, power limit, and whether `nvcc` is already available.
+The rig runs HiveOS / Ubuntu 22.04, driver 610.43.03, CUDA 12.8 and two sm_86 CMP 90HX cards with 10 GiB each. Run `bash scripts/rig_probe.sh` to refresh the report. The script does not read wallet addresses, pool passwords, or miner config files.
 
 ```bash
 bash scripts/rig_probe.sh
@@ -17,6 +21,8 @@ bash scripts/rig_probe.sh
 3. Implement the PearlHash CUDA path for the rig's architecture. Validate proof generation against a reference before optimizing.
 4. Benchmark kernel time, accepted shares, wall power, rejected and stale shares. Tune launch shape, batching, data movement and power limit from measurements.
 
-The official Pearl miner currently documents its CUDA tests for sm90 GPUs. We will verify the CMP 90HX capabilities from the rig before choosing the kernel path.
+The first cuBLAS INT8 probe measured 35.7 TOPS per card at 2048³, and 41.6 / 43.2 TOPS at 4096³. Those figures characterize hardware throughput; they are not PearlHash rates.
+
+Current Kryptex Stratum observation: `mining.authorize` sends an object containing `agent`, `type: "v2"`, `wallet`, and `worker`. `mining.notify` sends `header`, `height`, `job_id`, `target`, `cert_version`. `mining.submit` sends `job_id` and a gzip-compressed, base64-encoded `plain_proof`. A real Forge share was accepted with this format. Capture files are private and are not committed.
 
 References: [Pearl source](https://github.com/pearl-research-labs/pearl), [NVIDIA CMP specifications](https://www.nvidia.com/en-us/cmp/), [CUDA programming guide](https://docs.nvidia.com/cuda/cuda-programming-guide/).
