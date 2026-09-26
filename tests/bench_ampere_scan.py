@@ -9,7 +9,7 @@ import cupy as cp
 import triton.language as tl
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "kernels"))
-from ampere_scan import _Ptr, ampere_scan  # noqa: E402
+from ampere_scan import _Ptr, ampere_scan, ampere_dot_probe  # noqa: E402
 
 
 def main() -> None:
@@ -18,6 +18,35 @@ def main() -> None:
     a = cp.ones((16, m, 128), dtype=cp.int8)
     b = cp.ones((16, n, 128), dtype=cp.int8)
     t = cp.empty((row_batch * col_batch * 2, 16, 128), dtype=cp.uint32)
+    o = cp.empty((row_batch * 128 // 64, col_batch * 256 // 128, 128), dtype=cp.int32)
+    variants = (("dot-only", ampere_dot_probe, o),
+                ("transcript", ampere_scan, t))
+    for name, fn, output in variants:
+        grid = (row_batch * 128 // 64, col_batch * 256 // 128)
+
+        def probe_launch():
+            return fn[grid](_Ptr(a, tl.int8), _Ptr(b, tl.int8),
+                            _Ptr(output, tl.int32 if name == "dot-only" else tl.uint32),
+                            m, n, 0, 0, BM=64, BN=128, num_warps=4, num_stages=1)
+
+        kernel = None
+        for _ in range(3):
+            kernel = probe_launch()
+        cp.cuda.runtime.deviceSynchronize()
+        samples = []
+        for _ in range(10):
+            start, stop = cp.cuda.Event(), cp.cuda.Event()
+            start.record()
+            probe_launch()
+            stop.record()
+            stop.synchronize()
+            samples.append(cp.cuda.get_elapsed_time(start, stop))
+        samples.sort()
+        elapsed_ms = samples[len(samples) // 2]
+        mac = row_batch * 128 * col_batch * 256 * 2048
+        print(f"{name} regs={kernel.n_regs} shared={kernel.metadata.shared} "
+              f"median={elapsed_ms:.3f} ms rate={mac / (elapsed_ms * 1e-3) / 1e12:.2f} TMAC/s", flush=True)
+
     for bm, bn, bk, warps, stages in ((64, 128, 128, 4, 1),
                                        (64, 128, 128, 4, 2),
                                        (64, 128, 128, 4, 3),

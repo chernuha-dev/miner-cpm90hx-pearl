@@ -69,6 +69,34 @@ def ampere_scan(
                  + (pr_slice % row_split) * BM + tile_in_half, tile_xor)
 
 
+@triton.jit
+def ampere_dot_probe(A, B, O, M, N, RPI0, CPI0,
+                     BM: tl.constexpr = 64, BN: tl.constexpr = 128):
+    """Diagnostic: identical operand traffic and 16 dots, one final reduction."""
+    pr_slice = tl.program_id(0)
+    pc_slice = tl.program_id(1)
+    pr = pr_slice // (128 // BM)
+    rr = tl.arange(0, BM)
+    cc = tl.arange(0, BN)
+    kk = tl.arange(0, 128)
+    row_tile = (pr_slice % (128 // BM)) * (BM // 8) + rr // 8
+    row_u = rr % 8
+    row_base = tl.where(row_tile < 8, row_tile, 16 + row_tile - 8)
+    row = (RPI0 + pr) * 128 + row_base + (row_u // 2) * 32 + (row_u % 2) * 8
+    col_tile = (pc_slice % (256 // BN)) * (BN // 16) + cc // 16
+    col_v = cc % 16
+    col_base = tl.where(col_tile < 8, col_tile * 2, 16 + (col_tile - 8) * 2)
+    col = (CPI0 + pc_slice // (256 // BN)) * 256 + col_base + (col_v // 2) * 32 + col_v % 2
+    acc = tl.full((BM, BN), 0, tl.int32)
+    for step in range(16):
+        a = tl.load(A + (step * M + row[:, None]) * 128 + kk[None, :])
+        b = tl.load(B + (step * N + col[None, :]) * 128 + kk[:, None])
+        acc = tl.dot(a, b, acc)
+    result = tl.sum(acc, 0)
+    cta = pr_slice * tl.num_programs(1) + pc_slice
+    tl.store(O + cta * BN + cc, result)
+
+
 class _Ptr:
     def __init__(self, array, dtype):
         self.array = array
