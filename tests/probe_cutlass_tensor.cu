@@ -17,7 +17,7 @@ using DefaultMma = typename cutlass::gemm::threadblock::DefaultMma<
     2, cutlass::arch::OpMultiplyAdd,
     false, cutlass::gemm::SharedMemoryClearOption::kNone>::ThreadblockMma;
 
-__global__ void inspect_mma(const int8_t *a, const int8_t *b, int32_t *out) {
+__global__ void inspect_mma(int8_t *a, int8_t *b, int32_t *out) {
     extern __shared__ __align__(16) unsigned char buffer[];
     auto &storage = *reinterpret_cast<DefaultMma::SharedStorage *>(buffer);
     const int tid = threadIdx.x;
