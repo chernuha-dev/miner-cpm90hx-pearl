@@ -41,14 +41,19 @@ int main() {
            size_t(DefaultMma::FragmentC::kElements), sizeof(DefaultMma::SharedStorage));
     std::vector<int8_t> a(128 * 128, 0), b(256 * 128, 0);
     for (int row = 0; row < 128; ++row) {
-        for (int k = 0; k < 4; ++k) a[row * 128 + k] = int8_t(row);
+        int within = row % 64;
+        int logical_row = (row / 64) * 64 + (within % 8) * 8 + within / 8;
+        for (int k = 0; k < 4; ++k) a[row * 128 + k] = int8_t(logical_row);
         a[row * 128 + 4] = 1;
         a[row * 128 + 5] = 64;
     }
     for (int col = 0; col < 256; ++col) {
+        int within = col % 64;
+        int logical_col = (col / 64) * 64 + ((within % 8) / 2) * 16
+                          + (within / 8) * 2 + (within % 2);
         for (int k = 0; k < 4; ++k) b[col * 128 + k] = 64;
-        b[col * 128 + 4] = int8_t(col % 128);
-        b[col * 128 + 5] = int8_t(2 * (col / 128));
+        b[col * 128 + 4] = int8_t(logical_col % 128);
+        b[col * 128 + 5] = int8_t(2 * (logical_col / 128));
     }
     int8_t *da, *db;
     int32_t *dout;
@@ -67,6 +72,7 @@ int main() {
     cudaMemcpy(out.data(), dout, out.size() * sizeof(int32_t), cudaMemcpyDeviceToHost);
     std::vector<int> seen(128 * 256, 0);
     int single_tile_threads = 0;
+    bool tile_seen[256] = {};
     for (int tid = 0; tid < 256; ++tid) {
         int tile = -1;
         bool same_tile = true;
@@ -86,6 +92,13 @@ int main() {
             if (tile != t) same_tile = false;
         }
         single_tile_threads += same_tile;
+        if (same_tile) {
+            if (tile_seen[tile]) {
+                fprintf(stderr, "duplicate logical tile %d\n", tile);
+                return 1;
+            }
+            tile_seen[tile] = true;
+        }
         if (tid < 4) {
             int nr = 0, nc = 0;
             for (bool v : row_seen) nr += v;
@@ -110,5 +123,5 @@ int main() {
     printf("single_tile_threads=%d/256 unique=%d missing=%d duplicated=%d\n",
            single_tile_threads, unique, missing, duplicated);
     cudaFree(da); cudaFree(db); cudaFree(dout);
-    return unique == 128 * 256 ? 0 : 1;
+    return unique == 128 * 256 && single_tile_threads == 256 ? 0 : 1;
 }
