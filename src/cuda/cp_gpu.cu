@@ -946,40 +946,25 @@ static int gpu_prepare_noisy_matrices(
 /* Job-level zero-B: hash empty B^T, build noisy B into d_BpT (no d_Bt_sig). */
 static int gpu_prepare_job_b(GpuCtx* g, const uint8_t job_key[32], int m, int n)
 {
-    size_t szBpT = (size_t)n * K_DIM;
     double t0 = cp_now_sec();
 
-    CU_CHECK(cudaSetDevice(g->dev));
-    ensure_buffers(g, m, n);
-
     pearl_b_noise_seed_from_bt(job_key, NULL, n, K_DIM, g_salted, g_zero_b.b_noise_seed);
-    CU_CHECK(cudaMemcpy(g->d_seed_b, g_zero_b.b_noise_seed, 32, cudaMemcpyHostToDevice));
-
-    double t_step = cp_now_sec();
-    gpu_noise_generate_b(g, n);
-    CU_CHECK(cudaDeviceSynchronize());
-    printf("[gpu] zero-B noise gen (EBR/perm) %.3fs\n", cp_now_sec() - t_step);
-    fflush(stdout);
-
-    t_step = cp_now_sec();
-    gpu_noise_apply_b(g, n, /*d_bt_sig=*/NULL);
-    CU_CHECK(cudaDeviceSynchronize());
-    printf("[gpu] zero-B noise apply (B only) %.3fs\n", cp_now_sec() - t_step);
-    fflush(stdout);
-
-    for(int i = 1; i < g_ngpu; i++){
+    for(int i = 0; i < g_ngpu; i++){
         GpuCtx* gi = &g_gpus[i];
-        ensure_buffers(gi, m, n);
         CU_CHECK(cudaSetDevice(gi->dev));
-        CU_CHECK(cudaMemcpy(gi->d_BpT, g->d_BpT, szBpT, cudaMemcpyDeviceToDevice));
+        ensure_buffers(gi, m, n);
+        CU_CHECK(cudaMemcpy(gi->d_seed_b, g_zero_b.b_noise_seed, 32, cudaMemcpyHostToDevice));
+        gpu_noise_generate_b(gi, n);
+        gpu_noise_apply_b(gi, n, /*d_bt_sig=*/NULL);
+        CU_CHECK(cudaDeviceSynchronize());
     }
-    CU_CHECK(cudaSetDevice(g->dev));
 
     memcpy(g_zero_b.job_key, job_key, 32);
     g_zero_b.m = m;
     g_zero_b.n = n;
     g_zero_b.ready = 1;
-    printf("[gpu] zero-B job B cached on device (%.3fs total)\n", cp_now_sec() - t0);
+    printf("[gpu] zero-B job B cached on %d device(s) (%.3fs total)\n",
+           g_ngpu, cp_now_sec() - t0);
     fflush(stdout);
     return cp_job_should_cancel() ? -1 : 0;
 }
@@ -1739,15 +1724,20 @@ static int gpu_scan_device_period(
             const int batch_tiles = pp_batch_hash_tiles(row_batch, col_batch);
 
             for(int i = 0; i < g_ngpu; i++){
+                const int first = col_batch * i / g_ngpu;
+                const int last = col_batch * (i + 1) / g_ngpu;
+                if(first == last) continue;
                 GpuCtx* g = &g_gpus[i];
                 CU_CHECK(cudaSetDevice(g->dev));
                 gpu_period_gemm_batch(
-                    g, m, n, rpi0, cpi0, row_batch, col_batch, bound);
+                    g, m, n, rpi0, cpi0 + first, row_batch, last - first, bound);
                 launch_jackpot_batch(
-                    g, row_batch, col_batch, rpi0, cpi0, m, n, bound);
+                    g, row_batch, last - first, rpi0, cpi0 + first, m, n, bound);
             }
 
             for(int i = 0; i < g_ngpu; i++){
+                if(col_batch * i / g_ngpu == col_batch * (i + 1) / g_ngpu)
+                    continue;
                 GpuCtx* g = &g_gpus[i];
                 CU_CHECK(cudaSetDevice(g->dev));
                 CU_CHECK(cudaDeviceSynchronize());
@@ -1919,7 +1909,6 @@ int cp_gpu_mine_attempt(
     (void)h_A_sig;
     (void)h_Bt_sig;
     const double attempt_t0 = cp_now_sec();
-    size_t szAp = (size_t)m * K_DIM;
     uint8_t a_key_local[32];
     const uint8_t* scan_key = a_key;
     int zero = 0;
@@ -1944,7 +1933,8 @@ int cp_gpu_mine_attempt(
             if(gpu_prepare_job_b(g0, job_key, m, n) != 0)
                 return -1;
         }
-        if(gpu_prepare_attempt_a(g0, cp_gpu_fresh_rng_seed(), job_key, m, n,
+        const uint64_t rng_seed = cp_gpu_fresh_rng_seed();
+        if(gpu_prepare_attempt_a(g0, rng_seed, job_key, m, n,
                                  a_key_local) != 0)
             return -1;
         scan_key = a_key_local;
@@ -1956,9 +1946,14 @@ int cp_gpu_mine_attempt(
         for(int i = 1; i < g_ngpu; i++){
             GpuCtx* g = &g_gpus[i];
             ensure_buffers(g, m, n);
+            uint8_t other_a_key[32];
+            if(gpu_prepare_attempt_a(g, rng_seed, job_key, m, n, other_a_key) != 0)
+                return -1;
+            if(memcmp(other_a_key, a_key_local, 32) != 0){
+                fprintf(stderr, "[gpu] GPU%d A key disagrees with GPU%d\n", g->dev, g0->dev);
+                return -1;
+            }
             CU_CHECK(cudaSetDevice(g->dev));
-            CU_CHECK(cudaMemcpy(g->d_Ap, g0->d_Ap, szAp, cudaMemcpyDeviceToDevice));
-            /* d_BpT already mirrored in gpu_prepare_job_b. */
             CU_CHECK(cudaMemcpy(g->d_a_key8, a_key32, 32, cudaMemcpyHostToDevice));
             CU_CHECK(cudaMemcpy(g->d_found, &zero, sizeof(int), cudaMemcpyHostToDevice));
         }
