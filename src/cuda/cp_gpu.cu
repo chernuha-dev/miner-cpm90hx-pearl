@@ -793,9 +793,6 @@ static void gpu_period_gemm_batch(
 {
     if(g_ampere_tc){
         if(g_ampere_register){
-            CU_CHECK(cudaFuncSetAttribute(
-                pearl_cutlass_transcript, cudaFuncAttributeMaxDynamicSharedMemorySize,
-                sizeof(PearlTensorMma::SharedStorage)));
             pearl_cutlass_transcript<<<dim3(row_batch_count, col_batch_count),
                                        256, sizeof(PearlTensorMma::SharedStorage)>>>(
                 g->d_A_perm, g->d_B_perm, g->d_ampere_transcript,
