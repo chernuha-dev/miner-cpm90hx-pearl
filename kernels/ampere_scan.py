@@ -49,9 +49,8 @@ def ampere_scan(
         tile_xor = tl.reshape(acc.to(tl.uint32), (BM // 8, 8, BN // 16, 16))
         tile_xor = tl.xor_sum(tile_xor, 3)
         tile_xor = tl.xor_sum(tile_xor, 1)
-        output_words = BM * BN // 128
-        tile_xor = tl.reshape(tile_xor, (output_words,))
-        tile = tl.arange(0, output_words)
+        tile_xor = tl.reshape(tile_xor, (BM * BN // 128,))
+        tile = tl.arange(0, BM * BN // 128)
         local_col = tile % (BN // 16)
         row_tile_out = tile // (BN // 16)
         col_tile_out = (pc_slice % col_split) * (BN // 16) + local_col
