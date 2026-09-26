@@ -10,9 +10,9 @@ The miner charges **no developer fee**. The legacy upstream fee interface now al
 
 ## Current rig result
 
-The independent sm_86 tensor-core kernel uses two GPUs on disjoint search ranges. Its production-size full scan measured **50.26 TMAC/s** in an offline hard-target test (1.400 s scan, 0.017 s preparation, row batch 16, column batch 1024). A live Kryptex run with the current four-warp kernel found a GPU1 share, passed the local certificate-version-3 verifier, and received `{"id":2,"result":true,"error":null}` from the pool. The live scan held about 50 TMAC/s. During the preceding live run, the GPUs drew 179.47 and 179.55 W; power draw for the current kernel was not sampled separately.
+The `--ampere-register` kernel assigns one 8×16 Pearl hash tile to each thread's accumulator registers. A test compares every thread's 16 transcript words with a CPU reference. With the two-stage pipeline, its production-size full sweep measured **47.80 TMAC/s per GPU** offline (row batch 16, column batch 512). A two-GPU live Kryptex run scanned at about **94 TMAC/s**, found a GPU1 share, passed the local certificate-version-3 verifier, and received `{"error":null,"id":2,"result":true}` from the pool. Forge was restored immediately afterward. A three-stage pipeline passed the exact transcript test but measured only 45.89 TMAC/s per GPU, so the two-stage pipeline remains the default.
 
-TMAC/s is this miner's count of int8 matrix multiply-accumulate work. Forge reports TH/s, so a sustained accepted-share comparison is still needed before claiming a direct speed or profit ratio. The current scan and power readings do not establish an advantage over Forge.
+TMAC/s is this miner's count of int8 matrix multiply-accumulate work. Forge reports TH/s, so a sustained accepted-share comparison is still needed before claiming a direct speed or profit ratio. The current result does not establish an advantage over Forge. Forge was observed at about 180 W per GPU after the live test; the new kernel's power draw has not yet been measured.
 
 See [the rig benchmark notes](docs/rig-benchmarks.md) for tested launch shapes and validation results.
 
