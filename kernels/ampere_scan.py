@@ -21,13 +21,15 @@ def ampere_scan(
     BN: tl.constexpr = 128,
     BK: tl.constexpr = 128,
 ):
-    pr = tl.program_id(0)
+    row_split = 128 // BM
+    pr_slice = tl.program_id(0)
+    pr = pr_slice // row_split
     pc_half = tl.program_id(1)
     rr = tl.arange(0, BM)
     cc = tl.arange(0, BN)
     kk = tl.arange(0, BK)
 
-    row_tile = rr // 8
+    row_tile = (pr_slice % row_split) * (BM // 8) + rr // 8
     row_u = rr % 8
     row_base = tl.where(row_tile < 8, row_tile, 16 + row_tile - 8)
     row = (RPI0 + pr) * 128 + row_base + (row_u // 2) * 32 + (row_u % 2) * 8
@@ -43,14 +45,15 @@ def ampere_scan(
         b = tl.load(B + (step * N + col[None, :]) * 128 + kk[:, None])
         acc = tl.dot(a, b, acc)
 
-        tile_xor = tl.reshape(acc.to(tl.uint32), (16, 8, 8, 16))
+        tile_xor = tl.reshape(acc.to(tl.uint32), (BM // 8, 8, 8, 16))
         tile_xor = tl.xor_sum(tile_xor, 3)
         tile_xor = tl.xor_sum(tile_xor, 1)
-        tile_xor = tl.reshape(tile_xor, (128,))
-        tile = tl.arange(0, 128)
+        tile_xor = tl.reshape(tile_xor, (BM,))
+        tile = tl.arange(0, BM)
         batch_col_halves = tl.num_programs(1)
         local_cta = pr * batch_col_halves + pc_half
-        tl.store(T + (local_cta * 16 + step) * 128 + tile, tile_xor)
+        tl.store(T + (local_cta * 16 + step) * 128 + (pr_slice % row_split) * BM + tile,
+                 tile_xor)
 
 
 class _Ptr:
@@ -62,16 +65,16 @@ class _Ptr:
         return int(self.array.data.ptr)
 
 
-def build_cubin(output: Path) -> None:
+def build_cubin(output: Path, bm: int = 128) -> None:
     import cupy as cp
 
     cp.cuda.Device(0).use()
     a = cp.zeros((16, 128, 128), dtype=cp.int8)
     b = cp.zeros((16, 256, 128), dtype=cp.int8)
     t = cp.empty((2, 16, 128), dtype=cp.uint32)
-    kernel = ampere_scan[(1, 2)](
+    kernel = ampere_scan[(128 // bm, 2)](
         _Ptr(a, tl.int8), _Ptr(b, tl.int8), _Ptr(t, tl.uint32),
-        128, 256, 0, 0, num_warps=8, num_stages=1,
+        128, 256, 0, 0, BM=bm, num_warps=8, num_stages=1,
     )
     cp.cuda.runtime.deviceSynchronize()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -85,5 +88,6 @@ def build_cubin(output: Path) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, default=Path("kernels/ampere_sm86.cubin"))
+    parser.add_argument("--bm", type=int, choices=(64, 128), default=128)
     args = parser.parse_args()
-    build_cubin(args.output)
+    build_cubin(args.output, args.bm)
