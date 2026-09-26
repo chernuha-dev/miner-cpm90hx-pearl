@@ -10,9 +10,11 @@ The miner charges **no developer fee**. The legacy upstream fee interface now al
 
 ## Current rig result
 
-The independent sm_86 tensor-core kernel uses two GPUs on disjoint search ranges. Its production-size full scan measured **50.26 TMAC/s** in an offline hard-target test (1.400 s scan, 0.017 s preparation, row batch 16, column batch 1024). A live Kryptex run with the preceding kernel revision found a GPU1 share, passed the local certificate-version-3 verifier, and received `{"id":2,"result":true,"error":null}` from the pool. During that live run, the GPUs drew 179.47 and 179.55 W. The latest four-warp kernel also produced a GPU1 share that passed the local verifier; its pool acceptance has not yet been retested.
+The independent sm_86 tensor-core kernel uses two GPUs on disjoint search ranges. Its production-size full scan measured **50.26 TMAC/s** in an offline hard-target test (1.400 s scan, 0.017 s preparation, row batch 16, column batch 1024). A live Kryptex run with the current four-warp kernel found a GPU1 share, passed the local certificate-version-3 verifier, and received `{"id":2,"result":true,"error":null}` from the pool. The live scan held about 50 TMAC/s. During the preceding live run, the GPUs drew 179.47 and 179.55 W; power draw for the current kernel was not sampled separately.
 
 TMAC/s is this miner's count of int8 matrix multiply-accumulate work. Forge reports TH/s, so a sustained accepted-share comparison is still needed before claiming a direct speed or profit ratio. The current scan and power readings do not establish an advantage over Forge.
+
+See [the rig benchmark notes](docs/rig-benchmarks.md) for tested launch shapes and validation results.
 
 ## Rig environment
 
