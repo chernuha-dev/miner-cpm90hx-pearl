@@ -17,8 +17,12 @@ else
 fi
 
 printf '\n=== CUDA toolchain ===\n'
-if command -v nvcc >/dev/null 2>&1; then
-  nvcc --version | tail -4
+NVCC_BIN="$(command -v nvcc || true)"
+if [ -z "$NVCC_BIN" ] && [ -x /usr/local/cuda/bin/nvcc ]; then
+  NVCC_BIN=/usr/local/cuda/bin/nvcc
+fi
+if [ -n "$NVCC_BIN" ]; then
+  "$NVCC_BIN" --version | tail -4
 else
   printf 'nvcc is unavailable\n'
 fi

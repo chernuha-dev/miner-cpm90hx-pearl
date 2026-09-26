@@ -1,0 +1,4 @@
+bench/int8_gemm
+*.o
+*.log
+.env
