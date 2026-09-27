@@ -256,17 +256,33 @@ int main(int argc, char** argv)
         if(!strcmp(argv[i], "--pool") && i + 1 < argc){
             const char* u = argv[++i];
             const char* h = strstr(u, "://");
-            if(h){
-                h += 3;
-                const char* colon = strchr(h, ':');
-                if(colon){
-                    int hlen = (int)(colon - h);
-                    static char hbuf[256];
-                    strncpy(hbuf, h, hlen); hbuf[hlen] = 0;
-                    pool_host = hbuf;
-                    pool_port = atoi(colon + 1);
-                }
+            if(!h){
+                fprintf(stderr, "error: --pool '%s' is not a valid URI (expected scheme://host:port); "
+                        "refusing to silently fall back to the default pool\n", u);
+                return 1;
             }
+            h += 3;
+            const char* colon = strchr(h, ':');
+            if(!colon || colon == h){
+                fprintf(stderr, "error: --pool '%s' has no host:port; "
+                        "refusing to silently fall back to the default pool\n", u);
+                return 1;
+            }
+            int hlen = (int)(colon - h);
+            static char hbuf[256];
+            if(hlen >= (int)sizeof(hbuf)){
+                fprintf(stderr, "error: --pool host too long (max %zu chars)\n", sizeof(hbuf) - 1);
+                return 1;
+            }
+            strncpy(hbuf, h, hlen); hbuf[hlen] = 0;
+            char* pend = NULL;
+            long port = strtol(colon + 1, &pend, 10);
+            if(pend == colon + 1 || *pend != '\0' || port < 1 || port > 65535){
+                fprintf(stderr, "error: --pool '%s' has an invalid port (need 1-65535)\n", u);
+                return 1;
+            }
+            pool_host = hbuf;
+            pool_port = (int)port;
         } else if(!strcmp(argv[i], "--wallet") && i + 1 < argc){
             wallet = argv[++i];
         } else if(!strcmp(argv[i], "--backend") && i + 1 < argc){
@@ -583,19 +599,21 @@ int main(int argc, char** argv)
 #if defined(CP_ENABLE_OPENCL) && CP_ENABLE_OPENCL
         if(bid == CP_BACKEND_OPENCL) gpu_ok = 1;
 #endif
-        if(!gpu_ok){
-            fprintf(stderr, "--align-test requires CUDA or OpenCL backend\n");
-            return 1;
-        }
-        if(!ndev){ devs[0] = 0; ndev = 1; }
         cp_worker_apply_backend_defaults();
-        cp_worker_set_period_gemm(!no_period_gemm);
-        cp_worker_set_period_batch(period_batch);
-        cp_worker_set_row_period_batch(row_period_batch);
-        cp_worker_set_step_major_ap(step_major_ap);
-        cp_worker_set_cutlass_fused(cutlass_fused);
-        pearl_set_cutlass_fused(cutlass_fused);
-        g_cutlass_fused = cutlass_fused;
+        if(gpu_ok){
+            /* Device selection and GEMM layout only matter for the GPU
+             * self-tests below; the CPU alignment tests that follow are
+             * backend-independent (keyed-BLAKE3 noise derivation, Merkle
+             * chunk roots, V3 salted-seed pinned vectors). */
+            if(!ndev){ devs[0] = 0; ndev = 1; }
+            cp_worker_set_period_gemm(!no_period_gemm);
+            cp_worker_set_period_batch(period_batch);
+            cp_worker_set_row_period_batch(row_period_batch);
+            cp_worker_set_step_major_ap(step_major_ap);
+            cp_worker_set_cutlass_fused(cutlass_fused);
+            pearl_set_cutlass_fused(cutlass_fused);
+            g_cutlass_fused = cutlass_fused;
+        }
         if(pearl_run_alignment_tests() != 0) return 1;
         if(align_test_prod){
             const int pm = g_dev_dims ? DEV_M_DIM : M_DIM;
@@ -670,8 +688,22 @@ int main(int argc, char** argv)
 
 #if !((defined(CP_ENABLE_CUDA) && CP_ENABLE_CUDA) || (defined(CP_ENABLE_OPENCL) && CP_ENABLE_OPENCL))
     if(align_test){
-        fprintf(stderr, "--align-test requires CUDA or OpenCL backend (rebuild with -Backend Cuda/OpenCl)\n");
-        return 1;
+        /* No GPU backend compiled in: the CPU alignment tests are
+         * backend-independent (keyed-BLAKE3 noise derivation, Merkle chunk
+         * roots, V3 salted-seed pinned vectors), so run them anyway instead
+         * of refusing. GPU device self-tests are skipped. */
+        cp_worker_apply_backend_defaults();
+        if(pearl_run_alignment_tests() != 0) return 1;
+        if(align_test_prod){
+            const int pm = g_dev_dims ? DEV_M_DIM : M_DIM;
+            const int pn = g_dev_dims ? DEV_N_DIM : N_DIM;
+            if(g_dev_dims){
+                printf("[align-test-prod] DEV m=n=%d (omit --dev for production)\n", DEV_M_DIM);
+            }
+            if(pearl_run_alignment_tests_prod(pm, pn, K_DIM) != 0) return 1;
+        }
+        printf("[align-test] all tests passed\n");
+        return 0;
     }
     (void)align_test_prod;
 #endif

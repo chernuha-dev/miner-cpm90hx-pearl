@@ -2,7 +2,13 @@
 
 This document describes how CPminer derives **pearl noise** for mining scans and what data is required to build a **plain_proof** share. It mirrors the reference logic in `src/common/cp_noise.c` and `rust/cp-proof-ffi` (zk-pow–compatible).
 
-Production dimensions (unless `--dev`): `m = n = 131072`, `k = 4096`, `rank r = 256`.
+Production dimensions (unless `--dev`): `m = 131072`, `n = 262144`, `k = 2048`, `rank r = 128`
+(`M_DIM` / `N_DIM` / `K_DIM` / `R_RANK` in `include/cp_config.h`).
+`--dev` uses `m = n = 8192` (`DEV_M_DIM` / `DEV_N_DIM`).
+
+The miner builds **V3 (salted-seed) certificates** post-fork: `cert_version = 3`
+is the default (`cp_resolve_cert_version`), matching the Pearl salted-seed hard
+fork (mainnet height 99000).
 
 ---
 
@@ -85,8 +91,8 @@ Jackpot verification recomputes the same noise from **proof strips + job_key** (
 | `PEARL_SEED_LABEL_B` | `"B_tensor"` | Domain separator for B-side noise PRF |
 | `RANGE_MASK` | `63` | Low 6 bits of each PRF byte |
 | `ZERO_PT` | `16` | Bias subtracted after masking |
-| `k` | `4096` | Dot-product length |
-| `rank` | `256` | Width of uniform blocks; inner-hash period |
+| `k` | `2048` | Dot-product length |
+| `rank` | `128` | Width of uniform blocks; inner-hash period |
 
 Vendored `third_party/zk-pow` uses `ZERO_POINT_TRANSLATION = 32` (`[-32, 31]` uniform range). CPminer and CUDA use `ZERO_PT = 16`. Pool verify must use the same convention as the miner.
 
