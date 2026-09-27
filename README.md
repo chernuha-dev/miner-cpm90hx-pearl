@@ -18,6 +18,17 @@ See [the rig benchmark notes](docs/rig-benchmarks.md) for tested launch shapes a
 
 ## Rig environment
 
+Forge is the production miner while this implementation is being optimized. Its
+`forgeminer-prl.service` systemd unit is enabled for boot and restarts on failure.
+On the rig, run the idempotent check below before or after a reboot. Add
+`--reboot` to reboot immediately after the service check.
+
+```bash
+cd /opt/miner-cpm90hx-pearl
+sudo bash scripts/ensure_forge_boot.sh
+# optional: sudo bash scripts/ensure_forge_boot.sh --reboot
+```
+
 The rig runs HiveOS / Ubuntu 22.04, driver 610.43.03, CUDA 12.8 and two sm_86 CMP 90HX cards with 10 GiB each. Run `bash scripts/rig_probe.sh` to refresh the report. The script does not read wallet addresses, pool passwords, or miner config files.
 
 ```bash
