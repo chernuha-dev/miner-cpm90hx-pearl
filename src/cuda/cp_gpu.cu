@@ -1546,7 +1546,11 @@ int cp_gpu_run_scan_profile(int dev, int m, int n, int warmup, int runs)
      * measuring jackpot and making the sweep non-representative.
      */
     memset(pool_tgt, 0, sizeof(uint32_t) * 8);
-    cp_scale_jackpot_target(pool_tgt, bound);
+    if(!cp_scale_jackpot_target(pool_tgt, bound)){
+        /* Unreachable with an all-zero target, but keep the invariant explicit. */
+        fprintf(stderr, "[profile-scan] jackpot bound overflow on zero target\n");
+        return -1;
+    }
 
     const int col_periods = gpu_num_col_periods(n);
     const int row_periods = gpu_num_row_periods(m);
@@ -1724,7 +1728,11 @@ static int gpu_scan_device_period(
     uint64_t* out_tiles_scanned)
 {
     uint32_t bound[8];
-    cp_scale_jackpot_target(pool_tgt, bound);
+    if(!cp_scale_jackpot_target(pool_tgt, bound)){
+        fprintf(stderr, "[gpu] pool target * jackpot scale factor overflows 256 bits; "
+                "target unusable, skipping job\n");
+        return -1;
+    }
 
     const int row_periods = gpu_num_row_periods(m);
     const int col_periods = gpu_num_col_periods(n);
@@ -1820,7 +1828,11 @@ static int gpu_scan_device(
                                       out_t_rows, out_t_cols, out_tiles_scanned);
 
     uint32_t bound[8];
-    cp_scale_jackpot_target(pool_tgt, bound);
+    if(!cp_scale_jackpot_target(pool_tgt, bound)){
+        fprintf(stderr, "[gpu] pool target * jackpot scale factor overflows 256 bits; "
+                "target unusable, skipping job\n");
+        return -1;
+    }
 
     const int row_parts = cp_pp_num_row_parts(m, g_contiguous);
     const int col_parts = cp_pp_num_col_parts(n, g_contiguous);

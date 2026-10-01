@@ -455,7 +455,11 @@ extern "C" int cp_opencl_worker_mine_attempt(
     }
 
     uint32_t bound[8];
-    cp_scale_jackpot_target(pool_tgt, bound);
+    if(!cp_scale_jackpot_target(pool_tgt, bound)){
+        fprintf(stderr, "[ocl] pool target * jackpot scale factor overflows 256 bits; "
+                "target unusable, skipping job\n");
+        return -1;
+    }
     uint32_t a_key8[8];
     memcpy(a_key8, scan_key, 32);
 

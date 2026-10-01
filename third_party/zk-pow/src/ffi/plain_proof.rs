@@ -413,6 +413,66 @@ impl PlainProof {
         if let Some(moe) = &self.moe { self.n * moe.e } else { self.n }
     }
 
+    /// Leaf count the Merkle tree of a row-major byte buffer whose length is the
+    /// product of `dims` must declare. Errors if the product overflows `usize`.
+    fn expected_merkle_leaves(dims: &[usize]) -> Result<usize> {
+        let bytes = dims
+            .iter()
+            .try_fold(1usize, |acc, &d| acc.checked_mul(d))
+            .ok_or_else(|| anyhow::anyhow!("declared dimensions {dims:?} overflow usize"))?;
+        Ok(pearl_blake3::padded_chunk_len(bytes) / BLAKE3_CHUNK_LEN)
+    }
+
+    /// Rejects a proof whose committed Merkle trees don't have the leaf count
+    /// implied by the declared dimensions.
+    ///
+    /// The V3 noise seed is salted with the declared `m`/`n`, making them
+    /// consensus-critical: without pinning each tree's `total_leaves` to those
+    /// dimensions a miner could open one committed tree under several dimension
+    /// interpretations. The A/B trees are row-major `m*k` / `total_b_cols*k`
+    /// int8 bytes; the MoE routing tree is `m*top_k` little-endian `u32`s.
+    ///
+    /// Ported from upstream pearl-research-labs/pearl
+    /// `zk-pow/src/ffi/plain_proof.rs` (missing in this vendored copy).
+    fn check_declared_tree_sizes(&self) -> Result<()> {
+        let a_expected = Self::expected_merkle_leaves(&[self.m, self.k])?;
+        ensure_eq!(
+            self.a.proof.total_leaves,
+            a_expected,
+            "A Merkle tree declares {} leaves but m={} k={} imply {}",
+            self.a.proof.total_leaves,
+            self.m,
+            self.k,
+            a_expected
+        );
+
+        let b_expected = Self::expected_merkle_leaves(&[self.total_b_cols(), self.k])?;
+        ensure_eq!(
+            self.bt.proof.total_leaves,
+            b_expected,
+            "B^T Merkle tree declares {} leaves but n={} k={} (total columns {}) imply {}",
+            self.bt.proof.total_leaves,
+            self.n,
+            self.k,
+            self.total_b_cols(),
+            b_expected
+        );
+
+        if let Some(moe) = &self.moe {
+            let routing_expected = Self::expected_merkle_leaves(&[self.m, moe.top_k, std::mem::size_of::<u32>()])?;
+            ensure_eq!(
+                moe.routing_proof.total_leaves,
+                routing_expected,
+                "routing Merkle tree declares {} leaves but m={} top_k={} imply {}",
+                moe.routing_proof.total_leaves,
+                self.m,
+                moe.top_k,
+                routing_expected
+            );
+        }
+        Ok(())
+    }
+
     /// Derives the inner A/B index lists used to build the periodic patterns,
     /// plus the public `MoEParams` (when this is an MoE proof).
     fn moe_inner_indices(&self) -> Result<(Vec<u32>, Vec<u32>, Option<MoEParams>)> {
@@ -473,6 +533,10 @@ impl PlainProof {
         seed_derivation: crate::api::proof::SeedDerivation,
     ) -> Result<(PrivateProofParams, PublicProofParams)> {
         let (m, n, k) = (self.m, self.n, self.k);
+
+        // Reject proofs whose declared Merkle tree sizes disagree with the
+        // declared dimensions before doing any expensive checking.
+        self.check_declared_tree_sizes()?;
 
         for &tok in &self.a.row_indices {
             ensure!(tok < m, "routing entry {} out of range for t={}", tok, m);

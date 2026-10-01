@@ -305,9 +305,22 @@ static int cp_active_hash_w(void)
 void cp_target_from_difficulty(double difficulty, uint32_t tgt[8])
 {
     memset(tgt, 0, 8 * sizeof(uint32_t));
+    /* The tile-scan bound is pool_tgt * cp_jackpot_scale_factor() (see
+     * cp_scale_jackpot_target). For the fallback bound to equal the
+     * difficulty-implied share target 2^(256-d), the unscaled pool target
+     * must therefore be 2^(256-d)/factor, i.e. exponent 256-d-log2(factor).
+     *
+     * (Previously this added log2(R_RANK*h*w) instead of subtracting the
+     * scale factor, double-counting the rank terms: at d=32 the bound came
+     * out 2^32x too easy and saturated to U256::MAX, so every tile "beat"
+     * the target and all submitted shares were pool-invalid.) */
     long double exp_val = 256.0L - (long double)difficulty
-        + log2l((long double)(R_RANK * cp_active_hash_h() * cp_active_hash_w()));
+        - log2l((long double)cp_jackpot_scale_factor());
     if(exp_val >= 256.0L){
+        /* Degenerate difficulty (d <= -log2(factor)): the difficulty-implied
+         * bound does not fit in 256 bits. Saturate here; the jackpot scaler
+         * below refuses to hand out U256::MAX and the job is skipped loudly
+         * instead of minting shares that satisfy everything. */
         for(int i=0;i<8;i++) tgt[i]=0xFFFFFFFFu;
     } else if(exp_val > 0.0L){
         long double v = powl(2.0L, exp_val);
@@ -353,18 +366,28 @@ void cp_le_words_to_be_target_hex(const uint32_t tgt[8], char hex[65])
     cp_bin_to_hex(b, 32, hex);
 }
 
-void cp_scale_target_le(uint32_t tgt[8], uint64_t factor)
+/* Returns 1 and scales tgt in place when the product fits in 256 bits.
+ * Returns 0 and zeroes tgt on overflow: like upstream pearl zk-pow
+ * penalized_target_bound, an unusable bound is reported as unusable rather
+ * than saturated to U256::MAX, which every hash satisfies. A zeroed bound
+ * is fail-closed (no tile digest can beat it) even if a caller ignores the
+ * return value. */
+int cp_scale_target_le(uint32_t tgt[8], uint64_t factor)
 {
-    if(factor <= 1) return;
+    if(factor <= 1) return 1;
+    uint32_t out[8];
     uint64_t carry = 0;
     for(int i = 0; i < 8; i++){
         uint64_t p = (uint64_t)tgt[i] * factor + carry;
-        tgt[i] = (uint32_t)p;
+        out[i] = (uint32_t)p;
         carry = p >> 32;
     }
     if(carry){
-        for(int i = 0; i < 8; i++) tgt[i] = 0xFFFFFFFFu;
+        memset(tgt, 0, 8 * sizeof(uint32_t));
+        return 0;
     }
+    memcpy(tgt, out, sizeof(out));
+    return 1;
 }
 
 uint64_t cp_jackpot_scale_factor(void)
@@ -373,13 +396,18 @@ uint64_t cp_jackpot_scale_factor(void)
          * (uint64_t)(K_DIM / R_RANK) * (uint64_t)PENALTY_BASE_RANK;
 }
 
-void cp_scale_jackpot_target(const uint32_t pool_tgt[8], uint32_t bound[8])
+int cp_scale_jackpot_target(const uint32_t pool_tgt[8], uint32_t bound[8])
 {
     /* Rank-penalized bound: target * h * w * (k/r) * PENALTY_BASE_RANK
      * (pearl penalized_target_bound / check_rank_penalty). At r == 128 this
-     * equals the legacy unpenalized h*w*k scale. */
+     * equals the legacy unpenalized h*w*k scale.
+     *
+     * Returns 1 on success, 0 when the scaled bound does not fit in 256
+     * bits (bound is zeroed). Callers must skip the job: a saturated
+     * U256::MAX bound would accept every tile and mint only pool-rejected
+     * shares. */
     memcpy(bound, pool_tgt, 8 * sizeof(uint32_t));
-    cp_scale_target_le(bound, cp_jackpot_scale_factor());
+    return cp_scale_target_le(bound, cp_jackpot_scale_factor());
 }
 
 int cp_send_all(int sock, const void* data, size_t len)

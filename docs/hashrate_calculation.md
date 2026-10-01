@@ -12,8 +12,8 @@ With current constants (`include/cp_config.h`):
 |--------|------:|------|
 | `PP_HASH_H` | 8 | Hash-tile height |
 | `PP_HASH_W` | 16 | Hash-tile width |
-| `K_DIM` | 4096 | Inner dimension |
-| MACs / hash tile | **524 288** | `8 × 16 × 4096` |
+| `K_DIM` | 2048 | Inner dimension |
+| MACs / hash tile | **262 144** | `8 × 16 × 2048` |
 
 Implementation: `cp_pp_macs_per_hash_tile()`, `cp_pp_mac_rate_from_tiles()` in `src/common/cp_util.cpp`.
 
